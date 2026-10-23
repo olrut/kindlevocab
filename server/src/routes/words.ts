@@ -59,7 +59,7 @@ function queryParam<T extends z.ZodType>(schema: T, value: string | undefined, n
 export const wordsRoutes = new Hono<AppEnv>()
   .use(requireAuth)
   .post('/', async (c) => {
-    const { db, now, onWordWritten } = c.get('deps');
+    const { db, now, onWordWritten, audio } = c.get('deps');
     const userId = c.get('user').id;
     const input = await parseBody(c, createBody);
     const ts = now();
@@ -92,6 +92,7 @@ export const wordsRoutes = new Hono<AppEnv>()
       }
     }
     onWordWritten(row);
+    audio.downloadFor(row);
     return c.json(toWordJson(row), 201);
   })
   .get('/', (c) => {
