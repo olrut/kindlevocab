@@ -115,7 +115,7 @@ Server behaviour:
    - Anthropic Messages API (see § 4). Failure → 502, nothing cached.
 3. Store the full response plus the audio URL in `lookup_cache.payload` (the audio URL is internal; strip it from the client response).
 
-Errors: `{ "error": "not_english", "suggestion": "..." }` with 422 when Claude reports the word is not English or is misspelled.
+Errors: `{ "error": "not_english", "suggestion": "..." }` with 422 when Claude reports the word is not English or is misspelled. `not_english` replies are not cached. Any failure to get a usable answer from Claude (API or connection error, missing credentials, refusal, reply cut off at `max_tokens`, reply failing the schema) → 502, nothing cached.
 
 ### Words
 
@@ -138,7 +138,7 @@ Word JSON shape (camelCase):
 
 `serverTime` is reported 1 ms before the server's current time, so a write later in the same millisecond is still picked up by the next pull. A row may therefore be sent twice; clients upsert, so this is harmless. `since` must be an ISO-8601 timestamp (400 otherwise).
 
-On `POST /words`, after inserting, the server looks up the cached audio URL for that word and downloads it to `data/audio/<id>.mp3` in the background (fire-and-forget with logging). `audio_path` is set when the download finishes.
+On `POST /words`, after inserting, the server looks up the cached audio URL for that word and downloads it to `data/audio/<id>.mp3` in the background (fire-and-forget with logging). `audio_path` is set when the download finishes. The cached URL may come from a lookup with or without context (`word` or `word|…` key; newest wins). Setting `audio_path` is a write to `words`: it bumps `updated_at`, so sync clients see `hasAudio` change.
 
 ### Export / import
 
@@ -165,7 +165,11 @@ Rate limit Claude calls in the job to 5 concurrent requests.
 
 ## 4. Claude lookup prompt
 
-Model: the current smallest Claude model (Haiku family). `max_tokens: 400`, `temperature: 0.3`.
+Model: the current smallest Claude model (Haiku family): `claude-haiku-5-5`, overridable with `ANTHROPIC_MODEL`. `max_tokens: 1024`, `output_config.effort: "low"`, no sampling parameters.
+
+- No `temperature`: API version `2026-10-21` (the SDK default) rejects `temperature`/`top_p`/`top_k` on every model, and Haiku 5.5 rejects non-default values on older versions too. The JSON format is held by the prompt and the zod schema instead.
+- Haiku 5.5 thinks by default and thinking counts toward `max_tokens`, so the cap leaves room for it; low effort keeps it short. Read the answer from the `text` blocks (a reply may start with an empty `thinking` block).
+- `stop_reason: "refusal"` or `"max_tokens"` → treat as a failed lookup (502).
 
 System prompt:
 
@@ -193,7 +197,7 @@ Return exactly one candidate: the sense that fits this sentence. Use the given s
 If the word in the sentence is an inflected form, still define the base form.
 ```
 
-Parse the response with zod. Strip code fences if present. Reject anything that does not match the schema. Cache key is the word alone, or `word|sha1(context)` when context was given.
+Parse the response with zod. Strip code fences if present. Reject anything that does not match the schema. With context, a reply with more than one candidate is rejected, and the candidate's `example` is set to the given sentence (the server does not rely on the model copying it verbatim). Cache key is the word alone, or `word|sha1(context)` when context was given.
 
 ## 5. Web UI
 
@@ -299,7 +303,7 @@ services:
 `.env.example`:
 ```
 ANTHROPIC_API_KEY=
-ANTHROPIC_MODEL=claude-haiku-latest
+ANTHROPIC_MODEL=claude-haiku-5-5
 DATA_DIR=/app/data
 OBSIDIAN_DIR=/app/vault          # leave empty to disable export
 OBSIDIAN_HOST_DIR=/srv/obsidian  # host path mounted into the container
