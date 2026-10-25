@@ -6,6 +6,8 @@ export class HttpError extends Error {
   constructor(
     readonly status: ContentfulStatusCode,
     message: string,
+    /** Extra fields merged into the `{ error }` body, e.g. `suggestion` for not_english. */
+    readonly extra: Record<string, unknown> = {},
   ) {
     super(message);
   }
