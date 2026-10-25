@@ -4,7 +4,8 @@ import { MemoryRouter } from 'react-router';
 import { vi } from 'vitest';
 import { App } from '../src/App';
 
-export type Reply = { status?: number; body?: unknown; blob?: Blob };
+// Raw bytes rather than a Blob: Node 22's Response cannot read jsdom's Blob.
+export type Reply = { status?: number; body?: unknown; bytes?: Uint8Array<ArrayBuffer> };
 export type Request = { method: string; path: string; params: Record<string, string>; body: any; headers: Headers };
 type Route = Reply | ((req: Request) => Reply | Promise<Reply>);
 
@@ -38,7 +39,7 @@ export function fakeApi(routes: Record<string, Route> = {}) {
     if (!found) return json({ error: 'not found' }, 404);
     const route = found[0];
     const reply = typeof route === 'function' ? await route(req) : route;
-    if (reply.blob) return new Response(reply.blob, { status: reply.status ?? 200 });
+    if (reply.bytes) return new Response(reply.bytes, { status: reply.status ?? 200 });
     if (reply.status === 204) return new Response(null, { status: 204 });
     return json(reply.body ?? null, reply.status ?? 200);
   });

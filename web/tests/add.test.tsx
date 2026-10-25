@@ -111,7 +111,7 @@ describe('/add', () => {
     vi.stubGlobal('Audio', vi.fn(function (this: { play: typeof play }) { this.play = play; }));
     URL.createObjectURL = vi.fn(() => 'blob:x');
     URL.revokeObjectURL = vi.fn();
-    const { api, user } = await lookedUp({ 'GET /api/lookup/audio/:word': { blob: new Blob(['mp3']) } });
+    const { api, user } = await lookedUp({ 'GET /api/lookup/audio/:word': { bytes: new Uint8Array([1, 2, 3]) } });
     await user.click(screen.getByRole('button', { name: 'Play pronunciation' }));
     await waitFor(() => expect(play).toHaveBeenCalled());
     const [req] = api.callsTo('GET /api/lookup/audio/ubiquitous');
