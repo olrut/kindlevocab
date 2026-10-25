@@ -6,6 +6,7 @@ import { users, words, type WordRow } from '../db/schema.js';
 import { noteName, renderBookNote, renderIndex, renderWordNote, VAULT_ROOT, type Book } from './render.js';
 
 export type ExportCounts = { words: number; books: number };
+export type ExportRun = { at: string; ok: boolean; error: string | null };
 
 export type ObsidianExporter = {
   /** False when OBSIDIAN_DIR is unset: every call is then a no-op. */
@@ -18,6 +19,8 @@ export type ObsidianExporter = {
   flush(): Promise<void>;
   /** Waits for exports already running, without starting the pending one. For tests. */
   whenIdle(): Promise<void>;
+  /** When the user's folder was last exported and whether that worked; null if not since start. */
+  lastRun(userId: number): ExportRun | null;
 };
 
 /**
@@ -28,12 +31,14 @@ export type ObsidianExporter = {
 export function createObsidianExporter(deps: {
   db: Db;
   dir: string | null;
+  now?: () => string;
   debounceMs?: number;
   maxWaitMs?: number;
 }): ObsidianExporter {
   const { db, dir } = deps;
   const debounceMs = deps.debounceMs ?? 2000;
   const maxWaitMs = deps.maxWaitMs ?? 10_000;
+  const now = deps.now ?? (() => new Date().toISOString());
   if (dir === null) {
     return {
       enabled: false,
@@ -41,7 +46,21 @@ export function createObsidianExporter(deps: {
       exportAll: async () => ({ words: 0, books: 0 }),
       flush: async () => {},
       whenIdle: async () => {},
+      lastRun: () => null,
     };
+  }
+
+  const runs = new Map<number, ExportRun>();
+  /** Exports one user's folder and records the outcome for the settings page. */
+  async function exportRecorded(userId: number, only?: Set<number>): Promise<ExportCounts> {
+    try {
+      const counts = await exportUser(userId, only);
+      runs.set(userId, { at: now(), ok: true, error: null });
+      return counts;
+    } catch (err) {
+      runs.set(userId, { at: now(), ok: false, error: err instanceof Error ? err.message : String(err) });
+      throw err;
+    }
   }
 
   /** userId → ids of words written since the last flush. */
@@ -65,7 +84,7 @@ export function createObsidianExporter(deps: {
     return enqueue(async () => {
       for (const [userId, ids] of batch) {
         try {
-          await exportUser(userId, ids);
+          await exportRecorded(userId, ids);
         } catch (err) {
           console.error(`obsidian export for user ${userId} failed:`, err);
         }
@@ -141,7 +160,7 @@ export function createObsidianExporter(deps: {
         const ids = userId === undefined ? db.select({ id: users.id }).from(users).all().map((u) => u.id) : [userId];
         const total = { words: 0, books: 0 };
         for (const id of ids) {
-          const counts = await exportUser(id);
+          const counts = await exportRecorded(id);
           total.words += counts.words;
           total.books += counts.books;
         }
@@ -149,6 +168,7 @@ export function createObsidianExporter(deps: {
       });
     },
     flush: startFlush,
+    lastRun: (userId) => runs.get(userId) ?? null,
     async whenIdle() {
       // A job can enqueue behind the one awaited; loop until the chain stops moving.
       for (let c = chain; ; c = chain) {

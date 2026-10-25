@@ -25,7 +25,7 @@ export function makeApp(
   onTestFinished(() => rmSync(dataDir, { recursive: true, force: true }));
 
   const now = overrides.now ?? (() => new Date().toISOString());
-  const obsidian = createObsidianExporter({ db, dir: overrides.obsidianDir ?? null });
+  const obsidian = createObsidianExporter({ db, dir: overrides.obsidianDir ?? null, now });
   const onWordWritten: AppDeps['onWordWritten'] = (w) => {
     overrides.onWordWritten?.(w);
     obsidian.notify(w);

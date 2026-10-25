@@ -36,6 +36,7 @@ export function insertWord(db: Db, userId: number, input: NewWord, ts: string): 
     bookTitle: null,
     bookAuthor: null,
     kindleLookupAt: null,
+    notes: null,
     ...input,
     status,
     learnedAt: status === 'learned' ? ts : null,

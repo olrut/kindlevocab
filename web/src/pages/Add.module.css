@@ -1,0 +1,50 @@
+.search {
+  display: flex;
+  gap: 0.5rem;
+  align-items: end;
+  max-width: 36rem;
+}
+
+.wordLabel {
+  display: grid;
+  gap: 0.25rem;
+  flex: 1;
+  font-weight: 500;
+}
+
+.result h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.ipa {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.card {
+  display: grid;
+  gap: 0.35rem;
+  text-align: left;
+  padding: 0.8rem;
+}
+
+.card em {
+  color: var(--muted);
+}
+
+.link {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  text-decoration: underline;
+}

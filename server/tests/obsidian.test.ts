@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { words } from '../src/db/schema.js';
 import { renderBookNote, renderIndex, renderWordNote } from '../src/obsidian/render.js';
-import { makeApp } from './helpers.js';
+import { fakeClock, makeApp } from './helpers.js';
 
 const torpid = { word: 'torpid', definition: 'mentally or physically inactive', example: 'A torpid afternoon.', finnish: 'veltto', source: 'manual' };
 const ubiquitous = { word: 'ubiquitous', definition: 'present or found everywhere', source: 'claude' };
@@ -18,7 +18,8 @@ function vault() {
 
 async function setup(opts: { obsidian?: boolean } = {}) {
   const dir = opts.obsidian === false ? null : vault();
-  const ctx = makeApp({ obsidianDir: dir });
+  const clock = fakeClock();
+  const ctx = makeApp({ obsidianDir: dir, now: clock.now });
   const token = await ctx.loginAs('olli');
   const userDir = dir ? join(dir, 'Vocab', 'olli') : '';
   const read = (rel: string) => readFileSync(join(userDir, rel), 'utf8');
@@ -32,7 +33,7 @@ async function setup(opts: { obsidian?: boolean } = {}) {
   /** Puts a word on a Kindle book, as the Kindle import does. */
   const setBook = (id: number, bookTitle: string | null, bookAuthor: string | null = null) =>
     ctx.db.update(words).set({ bookTitle, bookAuthor }).where(eq(words.id, id)).run();
-  return { ...ctx, dir, userDir, token, read, has, add, row, setBook };
+  return { ...ctx, clock, dir, userDir, token, read, has, add, row, setBook };
 }
 
 describe('Obsidian export of single words', () => {
@@ -218,7 +219,7 @@ describe('POST /obsidian/export-all', () => {
 describe('Obsidian export disabled (OBSIDIAN_DIR unset)', () => {
   it('reports disabled, refuses export-all with 503 and ignores word writes', async () => {
     const { call, token, add, obsidian } = await setup({ obsidian: false });
-    expect((await call('GET', '/obsidian/status', { token })).body).toEqual({ enabled: false });
+    expect((await call('GET', '/obsidian/status', { token })).body).toEqual({ enabled: false, lastRun: null });
     expect((await call('POST', '/obsidian/export-all', { token })).status).toBe(503);
     await add(torpid);
     await obsidian.flush();
@@ -226,6 +227,37 @@ describe('Obsidian export disabled (OBSIDIAN_DIR unset)', () => {
 
   it('reports enabled when configured', async () => {
     const { call, token } = await setup();
-    expect((await call('GET', '/obsidian/status', { token })).body).toEqual({ enabled: true });
+    expect((await call('GET', '/obsidian/status', { token })).body).toEqual({ enabled: true, lastRun: null });
+  });
+});
+
+describe('GET /obsidian/status lastRun', () => {
+  it("reports the time and outcome of the user's last export", async () => {
+    const { add, call, token, obsidian, clock, dir, loginAs } = await setup();
+    await add(torpid);
+    await obsidian.flush();
+    const status = () => call('GET', '/obsidian/status', { token });
+    expect((await status()).body).toEqual({ enabled: true, lastRun: { at: clock.now(), ok: true, error: null } });
+
+    clock.advance();
+    rmSync(join(dir!, 'Vocab'), { recursive: true });
+    writeFileSync(join(dir!, 'Vocab'), 'a file where the folder should be');
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await add(ubiquitous);
+    await obsidian.flush();
+    err.mockRestore();
+    expect((await status()).body.lastRun).toEqual({ at: clock.now(), ok: false, error: expect.any(String) });
+
+    const anna = await loginAs('anna');
+    expect((await call('GET', '/obsidian/status', { token: anna })).body.lastRun).toBeNull();
+  });
+
+  it('records a failed export-all and answers it with 500', async () => {
+    const { call, token, dir } = await setup();
+    writeFileSync(join(dir!, 'Vocab'), 'a file where the folder should be');
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect((await call('POST', '/obsidian/export-all', { token })).status).toBe(500);
+    err.mockRestore();
+    expect((await call('GET', '/obsidian/status', { token })).body.lastRun).toMatchObject({ ok: false });
   });
 });
