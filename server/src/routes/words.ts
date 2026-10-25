@@ -3,7 +3,8 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { words, type WordRow } from '../db/schema.js';
 import type { AppEnv } from '../env.js';
-import { HttpError, isUniqueViolation, parseBody, parseId } from '../http.js';
+import { HttpError, parseBody, parseId } from '../http.js';
+import { insertWord } from '../wordStore.js';
 import { requireAuth } from './auth.js';
 
 const status = z.enum(['learning', 'learned']);
@@ -64,33 +65,8 @@ export const wordsRoutes = new Hono<AppEnv>()
     const input = await parseBody(c, createBody);
     const ts = now();
 
-    const existing = db
-      .select()
-      .from(words)
-      .where(and(eq(words.userId, userId), eq(words.word, input.word)))
-      .get();
-    if (existing && existing.deletedAt === null) throw new HttpError(409, 'word already exists');
-
-    let row: WordRow;
-    if (existing) {
-      row = db
-        .update(words)
-        .set({ ...input, status: 'learning', learnedAt: null, deletedAt: null, updatedAt: ts })
-        .where(eq(words.id, existing.id))
-        .returning()
-        .get();
-    } else {
-      try {
-        row = db
-          .insert(words)
-          .values({ ...input, userId, createdAt: ts, updatedAt: ts })
-          .returning()
-          .get();
-      } catch (err) {
-        if (isUniqueViolation(err)) throw new HttpError(409, 'word already exists');
-        throw err;
-      }
-    }
+    const row = insertWord(db, userId, input, ts);
+    if (!row) throw new HttpError(409, 'word already exists');
     onWordWritten(row);
     audio.downloadFor(row);
     return c.json(toWordJson(row), 201);

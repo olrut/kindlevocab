@@ -6,6 +6,7 @@ import { onTestFinished } from 'vitest';
 import { createApp, type AppDeps } from '../src/app.js';
 import { createAudioService } from '../src/audio.js';
 import { openDb } from '../src/db/index.js';
+import { createKindleImporter } from '../src/kindle/importer.js';
 import { createLookupService } from '../src/lookup/service.js';
 import { fakeHttp } from './fakeHttp.js';
 
@@ -32,7 +33,8 @@ export function makeApp(
   });
   const lookup = createLookupService({ db, fetch: http.fetch, anthropic, model: 'claude-haiku-5-5', now });
   const audio = createAudioService({ db, fetch: http.fetch, dataDir, now, onWordWritten });
-  const app = createApp({ db, now, onWordWritten, lookup, audio, dataDir });
+  const kindle = createKindleImporter({ db, lookup, audio, dataDir, now, onWordWritten });
+  const app = createApp({ db, now, onWordWritten, lookup, audio, kindle, dataDir });
 
   async function call(method: string, path: string, opts: { body?: unknown; token?: string } = {}) {
     const headers: Record<string, string> = {};
@@ -55,7 +57,7 @@ export function makeApp(
     return login.body.token as string;
   }
 
-  return { app, db, http, audio, dataDir, call, loginAs };
+  return { app, db, http, audio, kindle, dataDir, call, loginAs };
 }
 
 /** A controllable clock returning ISO strings; advance() moves it forward by ms. */
