@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { createApp } from './app.js';
 import { createAudioService } from './audio.js';
 import { openDb } from './db/index.js';
+import { createKindleImporter } from './kindle/importer.js';
 import { createLookupService } from './lookup/service.js';
 
 const dataDir = process.env.DATA_DIR ?? './data';
@@ -20,7 +21,8 @@ const onWordWritten = () => {};
 const anthropic = new Anthropic({ timeout: 30_000, maxRetries: 2 });
 const lookup = createLookupService({ db, fetch, anthropic, model, now });
 const audio = createAudioService({ db, fetch, dataDir, now, onWordWritten });
-const app = createApp({ db, now, onWordWritten, lookup, audio, dataDir });
+const kindle = createKindleImporter({ db, lookup, audio, dataDir, now, onWordWritten });
+const app = createApp({ db, now, onWordWritten, lookup, audio, kindle, dataDir });
 
 serve({ fetch: app.fetch, port }, (info) => {
   console.log(`vocab server listening on http://localhost:${info.port} (lookup model ${model})`);
