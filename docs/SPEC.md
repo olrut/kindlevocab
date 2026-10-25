@@ -124,18 +124,20 @@ Errors: `{ "error": "not_english", "suggestion": "..." }` with 422 when Claude r
 | POST | `/words` | `{ word, definition, example?, finnish?, ipa?, source }` | `201 { ...word }` (409 if exists and not deleted; if soft-deleted, revive and update) |
 | GET | `/words` | `?status=learning\|learned\|all` (default `learning`) | `[ ...words ]`, excludes deleted |
 | GET | `/words/:id` | – | word |
-| PATCH | `/words/:id` | any of `{ status, definition, example, finnish }` | updated word |
+| PATCH | `/words/:id` | any of `{ status, definition, example, finnish, notes }` | updated word (`notes`: up to 10 000 chars, trimmed, blank → null) |
 | DELETE | `/words/:id` | – | 204, sets `deleted_at` |
 | GET | `/words/changes` | `?since=<ISO>` | `{ serverTime, words: [ ... ] }` — all rows with `updated_at > since`, **including deleted ones** (`deletedAt` set) |
 | GET | `/audio/:id` | – | `audio/mpeg`, 404 if `audio_path` is NULL |
-| GET | `/obsidian/status` | – | `{ enabled }` — false when `OBSIDIAN_DIR` is unset |
-| POST | `/obsidian/export-all` | – | `{ words, books }` — rebuilds the current user's folder (§ 7); 503 when disabled |
+| GET | `/lookup/audio/:word` | – | `audio/mpeg` of a looked-up word that may not be saved yet (the /add page). The server fetches the cached dictionary audio URL; 404 if there is none or it cannot be fetched. Clients then use speech synthesis. |
+| GET | `/obsidian/status` | – | `{ enabled, lastRun: { at, ok, error } \| null }` — `enabled` is false when `OBSIDIAN_DIR` is unset; `lastRun` is this user's last export since the server started |
+| POST | `/obsidian/export-all` | – | `{ words, books }` — rebuilds the current user's folder (§ 7); 503 when disabled, 500 if writing fails |
 
 Word JSON shape (camelCase):
 ```json
 { "id": 42, "word": "ubiquitous", "definition": "...", "example": "...", "finnish": "...",
   "ipa": "...", "hasAudio": true, "source": "claude", "status": "learning",
-  "learnedAt": null, "createdAt": "...", "updatedAt": "...", "deletedAt": null }
+  "learnedAt": null, "bookTitle": null, "bookAuthor": null, "notes": null,
+  "createdAt": "...", "updatedAt": "...", "deletedAt": null }
 ```
 
 `serverTime` is reported 1 ms before the server's current time, so a write later in the same millisecond is still picked up by the next pull. A row may therefore be sent twice; clients upsert, so this is harmless. `since` must be an ISO-8601 timestamp (400 otherwise).
@@ -211,6 +213,14 @@ Pages (React Router):
 - `/settings` — export buttons, Obsidian export status (last run, "re-export all" button), switch user (logs out), create user.
 
 Token stored in `localStorage`; attach on every fetch; 401 → go to `/login`.
+
+Details:
+- Audio needs the token, so it is fetched as a blob and played from an object URL. Without a recording (or if it fails) the browser's speech synthesis (`en-US`) speaks the word.
+- `/login`: creating a user there logs in as them; on `/settings` it does not.
+- `/words`: delete asks for a second click; editing shows that Obsidian notes are overwritten and that notes belong in the Notes field.
+- `/import`: words that already exist start unselected; changing "only new" re-reads the file; progress is polled every second.
+- Production: `cd web && npm run build` writes to `server/public/`, which the server serves (override with `PUBLIC_DIR`). Hashed `/assets/*` are cached for a year, everything else is `no-cache`. A path without a file extension that is not under `/api` gets `index.html`; a missing file is a 404. In development `npm run dev` in `web/` proxies `/api` to port 3000.
+- The settings page's export buttons and the CSV/JSON import come with phase 6.
 
 ## 6. Android app
 

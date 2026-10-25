@@ -3,13 +3,15 @@ import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Db } from './db/index.js';
 import { words, type WordRow } from './db/schema.js';
-import { findCachedAudioUrl } from './lookup/service.js';
+import { findCachedAudioUrl, normalizeWord } from './lookup/service.js';
 
 export type AudioService = {
   /** Fire-and-forget: fetch the word's cached audio URL into data/audio/<id>.mp3. Failures are logged. */
   downloadFor(word: WordRow): void;
   /** Resolves when no download is in flight. For tests and shutdown. */
   whenIdle(): Promise<void>;
+  /** Audio for a looked-up word that may not be saved yet (the /add page), or null. Failures are logged. */
+  preview(word: string): Promise<Uint8Array<ArrayBuffer> | null>;
 };
 
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -26,15 +28,19 @@ export function createAudioService(deps: {
 }): AudioService {
   const inFlight = new Set<Promise<void>>();
 
-  async function download(word: WordRow) {
-    if (word.audioPath !== null) return;
-    const url = findCachedAudioUrl(deps.db, word.word);
-    if (!url) return;
-
+  async function fetchBytes(url: string) {
     const res = await deps.fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
     if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`);
     const bytes = new Uint8Array(await res.arrayBuffer());
     if (bytes.length === 0 || bytes.length > MAX_BYTES) throw new Error(`unexpected size ${bytes.length} from ${url}`);
+    return bytes;
+  }
+
+  async function download(word: WordRow) {
+    if (word.audioPath !== null) return;
+    const url = findCachedAudioUrl(deps.db, word.word);
+    if (!url) return;
+    const bytes = await fetchBytes(url);
 
     const rel = audioRelPath(word.id);
     const file = join(deps.dataDir, rel);
@@ -65,6 +71,16 @@ export function createAudioService(deps: {
       });
       inFlight.add(job);
       void job.finally(() => inFlight.delete(job));
+    },
+    async preview(word) {
+      const url = findCachedAudioUrl(deps.db, normalizeWord(word));
+      if (!url) return null;
+      try {
+        return await fetchBytes(url);
+      } catch (err) {
+        console.error(`audio preview for "${word}" failed:`, err instanceof Error ? err.message : err);
+        return null;
+      }
     },
     async whenIdle() {
       while (inFlight.size > 0) await Promise.all([...inFlight]);

@@ -35,6 +35,9 @@ describe('POST /words', () => {
       source: 'claude',
       status: 'learning',
       learnedAt: null,
+      bookTitle: null,
+      bookAuthor: null,
+      notes: null,
       createdAt: clock.now(),
       updatedAt: clock.now(),
       deletedAt: null,
@@ -68,7 +71,7 @@ describe('POST /words', () => {
   it('revives and updates a soft-deleted word', async () => {
     const { call, token, clock } = await setup();
     const first = await call('POST', '/words', { token, body: ubiquitous });
-    await call('PATCH', `/words/${first.body.id}`, { token, body: { status: 'learned' } });
+    await call('PATCH', `/words/${first.body.id}`, { token, body: { status: 'learned', notes: 'old notes' } });
     await call('DELETE', `/words/${first.body.id}`, { token });
     clock.advance();
 
@@ -84,6 +87,7 @@ describe('POST /words', () => {
       source: 'manual',
       status: 'learning',
       learnedAt: null,
+      notes: null,
       deletedAt: null,
       updatedAt: clock.now(),
     });
@@ -219,6 +223,20 @@ describe('status transitions (PATCH /words/:id)', () => {
       finnish: 'kaikkialla',
       updatedAt: clock.now(),
     });
+  });
+
+  it('sets and clears notes; blank notes are stored as null', async () => {
+    const { patch, clock } = await withWord();
+    clock.advance();
+    expect((await patch({ notes: '  Seen in Dune.\nTwice. ' })).body).toMatchObject({ notes: 'Seen in Dune.\nTwice.', updatedAt: clock.now() });
+    expect((await patch({ notes: '   ' })).body.notes).toBeNull();
+    await patch({ notes: 'again' });
+    expect((await patch({ notes: null })).body.notes).toBeNull();
+  });
+
+  it('rejects notes longer than 10 000 characters with 400', async () => {
+    const { patch } = await withWord();
+    expect((await patch({ notes: 'x'.repeat(10_001) })).status).toBe(400);
   });
 
   it('rejects an unknown status, an empty definition, or an empty patch with 400', async () => {

@@ -1,0 +1,64 @@
+.toolbar {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.toolbar input {
+  max-width: 18rem;
+}
+
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.tabs button[aria-selected='true'] {
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.example {
+  color: var(--muted);
+  font-style: italic;
+  font-size: 0.9rem;
+}
+
+.actions {
+  white-space: nowrap;
+}
+
+.actions button {
+  margin-right: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.85rem;
+}
+
+.danger {
+  border-color: var(--danger) !important;
+  color: var(--danger);
+}
+
+.hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}

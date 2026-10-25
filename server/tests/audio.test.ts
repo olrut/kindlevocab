@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { WordRow } from '../src/db/schema.js';
 import { dictionaryEntry, json, MP3_BYTES } from './fakeHttp.js';
 import { fakeClock, makeApp } from './helpers.js';
@@ -119,5 +119,34 @@ describe('GET /audio/:id', () => {
     expect((await call('GET', `/audio/${id}`)).status).toBe(401);
     await call('DELETE', `/words/${id}`, { token });
     expect((await call('GET', `/audio/${id}`, { token })).status).toBe(404);
+  });
+});
+
+describe('GET /lookup/audio/:word (preview before saving)', () => {
+  it('streams the cached audio of a looked-up word through the server', async () => {
+    const { call, token, app, http } = await setup();
+    await call('POST', '/lookup', { token, body: { word: 'ubiquitous' } });
+    const res = await app.request('/api/lookup/audio/Ubiquitous', { headers: { Authorization: `Bearer ${token}` } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('audio/mpeg');
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(MP3_BYTES);
+    expect(http.requests.filter((r) => r.url.href === 'https://media.test/ubiquitous.mp3')).toHaveLength(1);
+  });
+
+  it('returns 404 for a word that was never looked up, or whose audio cannot be fetched', async () => {
+    const { call, token, app, http } = await setup();
+    const get = (w: string) => app.request(`/api/lookup/audio/${w}`, { headers: { Authorization: `Bearer ${token}` } });
+    expect((await get('torpid')).status).toBe(404);
+
+    await call('POST', '/lookup', { token, body: { word: 'ubiquitous' } });
+    http.handlers.media = () => new Response('gone', { status: 410 });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect((await get('ubiquitous')).status).toBe(404);
+    err.mockRestore();
+  });
+
+  it('requires auth', async () => {
+    const { app } = await setup();
+    expect((await app.request('/api/lookup/audio/ubiquitous')).status).toBe(401);
   });
 });

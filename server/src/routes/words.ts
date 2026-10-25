@@ -25,6 +25,12 @@ const patchBody = z
     definition: z.string().trim().min(1, 'definition cannot be empty').optional(),
     example: z.string().nullable().optional(),
     finnish: z.string().nullable().optional(),
+    notes: z
+      .string()
+      .max(10_000, 'notes are too long')
+      .nullable()
+      .optional()
+      .transform((v) => (v === undefined ? undefined : v?.trim() || null)),
   })
   .refine((b) => Object.values(b).some((v) => v !== undefined), 'nothing to update');
 
@@ -45,6 +51,9 @@ export function toWordJson(w: WordRow) {
     source: w.source,
     status: w.status,
     learnedAt: w.learnedAt,
+    bookTitle: w.bookTitle,
+    bookAuthor: w.bookAuthor,
+    notes: w.notes,
     createdAt: w.createdAt,
     updatedAt: w.updatedAt,
     deletedAt: w.deletedAt,
