@@ -128,6 +128,8 @@ Errors: `{ "error": "not_english", "suggestion": "..." }` with 422 when Claude r
 | DELETE | `/words/:id` | – | 204, sets `deleted_at` |
 | GET | `/words/changes` | `?since=<ISO>` | `{ serverTime, words: [ ... ] }` — all rows with `updated_at > since`, **including deleted ones** (`deletedAt` set) |
 | GET | `/audio/:id` | – | `audio/mpeg`, 404 if `audio_path` is NULL |
+| GET | `/obsidian/status` | – | `{ enabled }` — false when `OBSIDIAN_DIR` is unset |
+| POST | `/obsidian/export-all` | – | `{ words, books }` — rebuilds the current user's folder (§ 7); 503 when disabled |
 
 Word JSON shape (camelCase):
 ```json
@@ -241,7 +243,7 @@ The "learned" gesture never calls the API directly; it writes to Room and `pendi
 
 ## 7. Obsidian export
 
-One-way mirror of the database into a vault folder. The server owns everything under `<OBSIDIAN_DIR>/<user name>/`; the rest of the vault is untouched. The server never reads the vault — manual edits there are overwritten on the next export of that word, so the UI should say so (notes belong in the `notes` field, not in the Markdown).
+One-way mirror of the database into a vault folder. The server owns everything under `<OBSIDIAN_DIR>/Vocab/<user name>/`; the rest of the vault, including other files directly in `Vocab/`, is untouched. The server never reads the vault — manual edits there are overwritten on the next export of that word, so the UI should say so (notes belong in the `notes` field, not in the Markdown).
 
 Layout:
 ```
@@ -275,13 +277,17 @@ tags: [vocab, vocab/learning]
 **Notes:** <notes field, omitted if empty>
 ```
 
-`Books/<book title>.md`: frontmatter `title`, `author`, `tags: [vocab/book]`; body is a bullet list of `[[word]]` links sorted alphabetically, with the sentence under each.
+The `#` comments in the template are documentation, not output. Empty fields are written as `key:` with no value; the `Example`, `Finnish` and `Notes` lines are omitted when empty. Free-text values are YAML double-quoted; `word` is quoted only when it would not read as a plain string (`yes`, `a: b`, …). Line breaks in text become spaces. `added`/`learned` are the UTC dates of `created_at`/`learned_at`.
+
+`Books/<book title>.md`: frontmatter `title`, `author`, `tags: [vocab/book]`; body is a bullet list of `[[word]]` links sorted alphabetically, with the sentence under each as a nested bullet. Links are written as `[[Vocab/<user>/Words/<word>|<word>]]` because two users can have the same word. A book with no live words left has no note. Words with the same sanitised title share one note; the first non-empty author wins.
 
 `index.md`: counts per status and a Dataview-friendly note explaining the folder. Keep it static apart from the counts.
 
-Filenames: word as-is (already lowercase ASCII-ish); for book titles replace `/ \ : * ? " < > |` with `-` and trim to 100 chars. Writes are atomic (write temp file, rename).
+Filenames: word as-is (already lowercase ASCII-ish); for book titles replace `/ \ : * ? " < > |` with `-` and trim to 100 chars. The same rule applies to words and user names (a word like `../x` must not leave the folder), and also replaces `[ ] # ^`, which break wiki links; control characters become spaces, leading dots and trailing dots/spaces are removed, and an empty result becomes `_`. If two words of a user sanitise to the same name, the older word owns the file. Writes are atomic (write temp file, rename).
 
 Trigger: a debounced (2 s) job after any word write; also `POST /obsidian/export-all` from settings. Deleted words → delete the note and remove the link from the book note. If `OBSIDIAN_DIR` is unset, the exporter is disabled and the settings page says so.
+
+Details: the 2 s wait restarts on every write, but a pending export runs at most 10 s after the first unexported write, so a long Kindle import is mirrored while it runs. Each run rewrites the written words' notes and all of that user's book notes and `index.md`. `export-all` (and a full export of every user at server start, which catches changes a restart lost) also rewrites every word note and removes `.md` files in `Words/` and `Books/` that no longer belong to a word or book; this directory listing is the only time the server looks at the vault, and other files are left alone. Exports run one at a time; a failed export is logged and never fails the API request that triggered it.
 
 Syncing the vault to phone and laptop is out of scope (Syncthing recommended; run it on the same VM pointing at the same folder).
 
