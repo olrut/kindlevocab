@@ -3,6 +3,7 @@ import type { AudioService } from './audio.js';
 import type { Db } from './db/index.js';
 import type { KindleImporter } from './kindle/importer.js';
 import type { LookupService } from './lookup/service.js';
+import type { ObsidianExporter } from './obsidian/exporter.js';
 import type { WordRow } from './db/schema.js';
 import type { AppEnv } from './env.js';
 import { HttpError } from './http.js';
@@ -10,6 +11,7 @@ import { audioRoutes } from './routes/audio.js';
 import { authRoutes } from './routes/auth.js';
 import { kindleRoutes } from './routes/kindle.js';
 import { lookupRoutes } from './routes/lookup.js';
+import { obsidianRoutes } from './routes/obsidian.js';
 import { usersRoutes } from './routes/users.js';
 import { wordsRoutes } from './routes/words.js';
 
@@ -22,6 +24,7 @@ export interface AppDeps {
   lookup: LookupService;
   audio: AudioService;
   kindle: KindleImporter;
+  obsidian: ObsidianExporter;
   /** Root for audio/ and tmp/. */
   dataDir: string;
 }
@@ -39,7 +42,8 @@ export function createApp(input: Partial<Pick<AppDeps, 'now' | 'onWordWritten'>>
     .route('/words', wordsRoutes)
     .route('/lookup', lookupRoutes)
     .route('/audio', audioRoutes)
-    .route('/import/kindle', kindleRoutes);
+    .route('/import/kindle', kindleRoutes)
+    .route('/obsidian', obsidianRoutes);
 
   const app = new Hono<AppEnv>();
   app.route('/api', api);
