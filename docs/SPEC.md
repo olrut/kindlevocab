@@ -226,7 +226,8 @@ Details:
 ## 6. Android app
 
 Screens:
-- **UserPicker** — same list as web; stores token in EncryptedSharedPreferences.
+- **Server** (first run, and "Change server" on the picker) — the server address, e.g. `https://vocab.tail1234.ts.net`; `https://` is assumed when no scheme is given, `/api/` is appended. Connecting checks it with `GET /users`. Cleartext `http://` is allowed (the tailnet encrypts; also for a dev server at `http://10.0.2.2:3000` from the emulator).
+- **UserPicker** — same list as web; a user with a PIN gets a PIN field (focused; Go logs in). Login sends `device: "android:<Build.MODEL>"`. Server address, token and user name are stored in EncryptedSharedPreferences; the app reopens on Review while the token is valid. A 401 on a request that carried the token clears it and returns here with "Signed out by the server".
 - **Review** — the only real screen.
   - Full-screen word, large centred text, keep-screen-on.
   - Tap: reveal definition, example, finnish, IPA; play button (local mp3 if cached, else Android `TextToSpeech` en-US).
@@ -234,7 +235,9 @@ Screens:
   - Swipe down (vertical drag > 25 % of height): mark learned, advance, show a 3-second snackbar "Marked as learned — Undo".
   - Order: shuffle the learning list on screen entry and whenever it is exhausted; then start over.
   - Empty list: "No words to learn. Add words in the web app." plus a sync button.
-- Small overflow menu: Sync now, Switch user.
+- Small overflow menu: Sync now, Switch user (calls `POST /auth/logout`, best effort, and forgets the token).
+
+Phase 8 (online only) reads `GET /words?status=learning` on entry, whenever the app returns to the front, and on Sync; the current word stays in front across a reload. Marking learned removes the word at once and sends `PATCH /words/:id { status: "learned" }`; if that fails the word comes back with an error. Undo puts it back as the current word and sends `{ status: "learning" }`; patches go out one at a time, in order. The play button downloads `GET /audio/:id` into the cache dir on first use when `hasAudio`, else (or on failure) uses TextToSpeech. Phase 9 replaces the direct patches with the Room cache and `pending_changes` below.
 
 Local storage (Room):
 ```
