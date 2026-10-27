@@ -1,0 +1,8 @@
+.git
+**/node_modules
+**/dist
+server/public
+data
+vault
+.env
+android

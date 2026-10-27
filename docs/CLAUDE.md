@@ -32,7 +32,7 @@ cd server && npm test             # vitest
 cd server && npm run db:migrate   # drizzle migrations
 cd web && npm run dev             # vite dev server proxying /api to :3000
 cd web && npm run build
-docker compose up --build
+docker compose up --build         # needs .env (cp .env.example .env) and a writable data/; see SPEC § 8
 ```
 
 ## Conventions

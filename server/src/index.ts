@@ -40,9 +40,26 @@ const app = createApp({
   publicDir: existsSync(join(publicDir, 'index.html')) ? publicDir : null,
 });
 
-serve({ fetch: app.fetch, port }, (info) => {
+const server = serve({ fetch: app.fetch, port }, (info) => {
   console.log(`vocab server listening on http://localhost:${info.port} (lookup model ${model})`);
 });
+
+// In Docker the server is PID 1, which has no default SIGTERM handler: without this, `docker stop`
+// waits 10 s and kills it. Write the pending Obsidian export first. A Kindle import cut short is
+// offered again by the next "only new" preview; an audio download cut short stays missing (TTS).
+let stopping = false;
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  process.on(signal, () => {
+    if (stopping) return;
+    stopping = true;
+    console.log(`${signal}: shutting down`);
+    server.close();
+    obsidian
+      .flush()
+      .catch((err: unknown) => console.error('obsidian: export on shutdown failed:', err))
+      .finally(() => process.exit(0));
+  });
+}
 
 // Catch up on anything a crash or restart lost from the debounce window.
 if (obsidian.enabled) {

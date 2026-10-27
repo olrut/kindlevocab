@@ -43,6 +43,8 @@ export function createApp(input: Partial<Pick<AppDeps, Defaulted>> & Omit<AppDep
       c.set('deps', deps);
       await next();
     })
+    // Docker's HEALTHCHECK; the database is open by the time the app exists.
+    .get('/health', (c) => c.json({ ok: true }))
     .route('/users', usersRoutes)
     .route('/auth', authRoutes)
     .route('/words', wordsRoutes)
