@@ -146,8 +146,8 @@ On `POST /words`, after inserting, the server looks up the cached audio URL for 
 
 ### Export / import
 
-- `GET /export?format=json|csv` — all non-deleted words of the current user. CSV columns: `word,definition,example,finnish,ipa,status,learned_at,created_at,book_title,book_author,notes`.
-- `POST /import` — multipart file (`.json` or `.csv`, same shape). Existing words (same `word`) are skipped. `source = 'import'`. Response `{ imported, skipped }`. Audio is fetched lazily for imported words: after import, enqueue a lookup of the dictionary API for each new word to fill `ipa`/audio if missing.
+- `GET /export?format=json|csv` (default `json`; anything else → 400) — all non-deleted words of the current user, ordered by id, as a download (`Content-Disposition: attachment; filename="vocab-<user>-<YYYY-MM-DD>.<ext>"`). CSV columns: `word,definition,example,finnish,ipa,status,learned_at,created_at,book_title,book_author,notes`. JSON is an array of objects with exactly those keys (snake_case, `null` for no value). CSV is RFC 4180: header row, CRLF line ends, empty cell for no value, quotes around fields containing `,` `"` a line break or leading/trailing whitespace; it starts with a UTF-8 BOM so spreadsheet apps read ä, ö and IPA correctly.
+- `POST /import` — multipart `file` (`.csv` or `.json` by file name, case-insensitive; max 10 MB → 413), same shape as the export. CSV: the header names the columns, in any order; unknown columns are ignored; `word` and `definition` are required columns; every row must have as many fields as the header; a BOM and blank lines are ignored. JSON: an array of objects; missing keys mean no value. Per word: text is trimmed and blank means no value; `word` (lowercased, ≤ 100 chars) and `definition` are required; `status` is `learning` (also when blank) or `learned`; `learned_at` is kept only for `learned` (default now); `created_at` is kept (default now); timestamps must be ISO-8601; `notes` ≤ 10 000 chars. Any invalid word → 400 `{ error }` naming it (`row N` counts the CSV header as row 1; `item N` is 1-based in JSON) and nothing is imported. Otherwise all words go in one transaction: existing live words (same normalised `word`, also repeats within the file) are skipped, soft-deleted ones are revived as with `POST /words`, the rest are inserted with `source = 'import'`. Response `{ imported, skipped }`. Audio is fetched lazily for imported words: after import each new word is queued for a Free Dictionary API lookup (no Claude call, at most 2 at a time, not cached in `lookup_cache`) that fills `ipa` if it is missing and downloads the audio to `data/audio/<id>.mp3` if there is none (a cached `/lookup` audio URL is used first). A word deleted while queued is skipped. Filling either is a write to `words` (bumps `updated_at`).
 
 ### Kindle import
 
@@ -220,7 +220,8 @@ Details:
 - `/words`: delete asks for a second click; editing shows that Obsidian notes are overwritten and that notes belong in the Notes field.
 - `/import`: words that already exist start unselected; changing "only new" re-reads the file; progress is polled every second.
 - Production: `cd web && npm run build` writes to `server/public/`, which the server serves (override with `PUBLIC_DIR`). Hashed `/assets/*` are cached for a year, everything else is `no-cache`. A path without a file extension that is not under `/api` gets `index.html`; a missing file is a 404. In development `npm run dev` in `web/` proxies `/api` to port 3000.
-- The settings page's export buttons and the CSV/JSON import come with phase 6.
+- `/settings`: "Export CSV" / "Export JSON" fetch `/export` with the token and save it under the server's file name.
+- `/import`: the CSV/JSON import uploads as soon as a file is chosen and shows `{ imported, skipped }` or the server's error.
 
 ## 6. Android app
 

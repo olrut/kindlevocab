@@ -128,6 +128,18 @@ export const api = {
     json<ImportProgress>(`/import/kindle/${importId}/confirm`, { method: 'POST', json: { words, markMasteredAsLearned } }),
   kindleProgress: (importId: string) => json<ImportProgress>(`/import/kindle/${importId}`),
 
+  /** The export file and the name the server suggests for it. */
+  exportWords: async (format: 'csv' | 'json') => {
+    const res = await request(`/export?format=${format}`);
+    const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1];
+    return { blob: await res.blob(), filename: name ?? `vocab-${new Date().toISOString().slice(0, 10)}.${format}` };
+  },
+  importWords: (file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return json<{ imported: number; skipped: number }>('/import', { method: 'POST', form });
+  },
+
   obsidianStatus: () => json<ObsidianStatus>('/obsidian/status'),
   obsidianExportAll: () => json<{ words: number; books: number }>('/obsidian/export-all', { method: 'POST' }),
 };

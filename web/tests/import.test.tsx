@@ -105,3 +105,30 @@ describe('/import (Kindle)', () => {
     expect(await screen.findByText(/No new words/)).toBeInTheDocument();
   });
 });
+
+describe('/import (CSV / JSON)', () => {
+  const csvFile = () => new File(['word,definition\nlucid,clear\n'], 'words.csv', { type: 'text/csv' });
+
+  it('uploads the file and reports what was imported', async () => {
+    const api = fakeApi({ 'POST /api/import': { body: { imported: 3, skipped: 1 } } });
+    const { user } = renderApp('/import');
+    await user.upload(await screen.findByLabelText('CSV or JSON file'), csvFile());
+    expect(await screen.findByText('Imported 3 words; 1 already existed and was skipped.')).toBeInTheDocument();
+    const sent = api.callsTo('POST /api/import')[0].body as FormData;
+    expect((sent.get('file') as File).name).toBe('words.csv');
+  });
+
+  it('pluralises the skipped count', async () => {
+    fakeApi({ 'POST /api/import': { body: { imported: 1, skipped: 0 } } });
+    const { user } = renderApp('/import');
+    await user.upload(await screen.findByLabelText('CSV or JSON file'), csvFile());
+    expect(await screen.findByText('Imported 1 word; 0 already existed and were skipped.')).toBeInTheDocument();
+  });
+
+  it('shows why the server rejected the file', async () => {
+    fakeApi({ 'POST /api/import': { status: 400, body: { error: 'row 3: definition is required' } } });
+    const { user } = renderApp('/import');
+    await user.upload(await screen.findByLabelText('CSV or JSON file'), csvFile());
+    expect(await screen.findByRole('alert')).toHaveTextContent('row 3: definition is required');
+  });
+});

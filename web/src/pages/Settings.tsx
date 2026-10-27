@@ -12,6 +12,7 @@ export function SettingsPage() {
   const [status, setStatus] = useState<ObsidianStatus | null>(null);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   const loadStatus = () => api.obsidianStatus().then(setStatus, (err) => setError(errorMessage(err)));
   useEffect(() => {
@@ -32,6 +33,22 @@ export function SettingsPage() {
     }
   }
 
+  async function download(format: 'csv' | 'json') {
+    setDownloadError(null);
+    try {
+      const { blob, filename } = await api.exportWords(format);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      // Revoke after the click has started the download.
+      setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (err) {
+      setDownloadError(errorMessage(err));
+    }
+  }
+
   async function switchUser() {
     try {
       await api.logout();
@@ -44,6 +61,24 @@ export function SettingsPage() {
   return (
     <>
       <h1>Settings</h1>
+
+      <section className={styles.section}>
+        <h2>Export</h2>
+        <p className={forms.hint}>All your words, learned ones included. Import the file again on the Import page.</p>
+        <div className={forms.actions}>
+          <button type="button" onClick={() => download('csv')}>
+            Export CSV
+          </button>
+          <button type="button" onClick={() => download('json')}>
+            Export JSON
+          </button>
+        </div>
+        {downloadError && (
+          <p role="alert" className={forms.error}>
+            {downloadError}
+          </p>
+        )}
+      </section>
 
       <section className={styles.section}>
         <h2>Obsidian</h2>
