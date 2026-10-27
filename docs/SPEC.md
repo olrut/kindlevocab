@@ -77,7 +77,7 @@ Rules:
 
 ## 3. API
 
-Base path `/api`. JSON bodies and responses. Auth: `Authorization: Bearer <token>` on everything except `GET /users`, `POST /users`, `POST /auth/login`. Unknown token → 401. Errors → `{ "error": "..." }`.
+Base path `/api`. JSON bodies and responses. Auth: `Authorization: Bearer <token>` on everything except `GET /health`, `GET /users`, `POST /users`, `POST /auth/login`. Unknown token → 401. Errors → `{ "error": "..." }`.
 
 ### Users and auth
 
@@ -304,30 +304,51 @@ Syncing the vault to phone and laptop is out of scope (Syncthing recommended; ru
 
 ## 8. Deployment
 
-`docker-compose.yml`:
+`docker-compose.yml` (build context is the repo root, because the image also builds `web/`):
 ```yaml
 services:
   server:
-    build: ./server
-    ports: ["3000:3000"]
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    ports: ["${PORT:-3000}:3000"]
     env_file: .env
+    environment:
+      DATA_DIR: /app/data
+      PORT: "3000"
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
     volumes:
       - ./data:/app/data
-      - ${OBSIDIAN_HOST_DIR}:/app/vault
+      - ${OBSIDIAN_HOST_DIR:-./vault}:/app/vault
     restart: unless-stopped
 ```
 
-`.env.example`:
+`.env.example` (comments on their own lines; compose reads the file both for the container and for `${…}` in the compose file):
 ```
 ANTHROPIC_API_KEY=
 ANTHROPIC_MODEL=claude-haiku-5-5
-DATA_DIR=/app/data
-OBSIDIAN_DIR=/app/vault          # leave empty to disable export
-OBSIDIAN_HOST_DIR=/srv/obsidian  # host path mounted into the container
+# leave empty to disable the Obsidian export
+OBSIDIAN_DIR=/app/vault
+# host folder mounted at /app/vault
+OBSIDIAN_HOST_DIR=/srv/obsidian
+# host port
 PORT=3000
+# host user owning data/ and the vault files (id -u / id -g)
+APP_UID=1000
+APP_GID=1000
 ```
 
-Expose with `tailscale serve --bg 3000` on the VM so clients get HTTPS at `https://<host>.<tailnet>.ts.net`. Back up by copying `data/`.
+Image (`server/Dockerfile`, Node 22 bookworm-slim, three stages): build the web UI into `public/`; `npm ci --omit=dev` for the server (with python3/make/g++ only in that stage, for better-sqlite3); the runtime stage runs `node --import tsx src/index.ts` as the given user. `tsx` is therefore a runtime dependency. Migrations run at startup (`openDb`). `GET /api/health` → `{ ok: true }` (no auth) backs the image's `HEALTHCHECK`. On SIGTERM/SIGINT the server stops accepting requests, writes the pending Obsidian export and exits, so `docker stop` is immediate.
+
+First run on the VM:
+```
+git clone … && cd kindlevocab
+cp .env.example .env            # set ANTHROPIC_API_KEY, OBSIDIAN_HOST_DIR, APP_UID/APP_GID
+mkdir -p data                   # must be writable by APP_UID; Docker would create it as root
+docker compose up -d --build
+tailscale serve --bg 3000
+```
+Clients then get HTTPS at `https://<host>.<tailnet>.ts.net`. Update with `git pull && docker compose up -d --build`. Back up by copying `data/` (stop the container first, or use `sqlite3 data/vocab.db ".backup …"`, since the database is in WAL mode).
 
 ## 9. Build order
 
