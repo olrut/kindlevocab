@@ -13,6 +13,7 @@ import { authRoutes } from './routes/auth.js';
 import { kindleRoutes } from './routes/kindle.js';
 import { lookupRoutes } from './routes/lookup.js';
 import { obsidianRoutes } from './routes/obsidian.js';
+import { transferRoutes } from './routes/transfer.js';
 import { usersRoutes } from './routes/users.js';
 import { wordsRoutes } from './routes/words.js';
 
@@ -48,7 +49,8 @@ export function createApp(input: Partial<Pick<AppDeps, Defaulted>> & Omit<AppDep
     .route('/lookup', lookupRoutes)
     .route('/audio', audioRoutes)
     .route('/import/kindle', kindleRoutes)
-    .route('/obsidian', obsidianRoutes);
+    .route('/obsidian', obsidianRoutes)
+    .route('/', transferRoutes);
 
   const app = new Hono<AppEnv>();
   app.route('/api', api);

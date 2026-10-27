@@ -22,7 +22,6 @@ export function makeApp(
   const db = openDb(':memory:');
   const http = fakeHttp();
   const dataDir = mkdtempSync(join(tmpdir(), 'vocab-test-'));
-  onTestFinished(() => rmSync(dataDir, { recursive: true, force: true }));
 
   const now = overrides.now ?? (() => new Date().toISOString());
   const obsidian = createObsidianExporter({ db, dir: overrides.obsidianDir ?? null, now });
@@ -39,6 +38,11 @@ export function makeApp(
   });
   const lookup = createLookupService({ db, fetch: http.fetch, anthropic, model: 'claude-haiku-5-5', now });
   const audio = createAudioService({ db, fetch: http.fetch, dataDir, now, onWordWritten });
+  // Let background downloads finish before their data dir goes away.
+  onTestFinished(async () => {
+    await audio.whenIdle();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
   const kindle = createKindleImporter({ db, lookup, audio, dataDir, now, onWordWritten });
   const app = createApp({ db, now, onWordWritten, lookup, audio, kindle, obsidian, dataDir });
 

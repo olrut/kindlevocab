@@ -1,5 +1,5 @@
 import { screen, waitFor } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { fakeApi, renderApp } from './fakeApi';
 
 describe('/settings', () => {
@@ -54,5 +54,58 @@ describe('/settings', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('Created user “anna”');
     expect(api.callsTo('POST /api/users')[0].body).toEqual({ name: 'anna' });
     expect(api.callsTo('POST /api/auth/login')).toHaveLength(0);
+  });
+});
+
+describe('/settings export', () => {
+  function captureDownloads() {
+    const blobs: Blob[] = [];
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: (b: Blob) => (blobs.push(b), 'blob:x'), revokeObjectURL: vi.fn() }));
+    const clicked: { href: string; download: string }[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      clicked.push({ href: this.href, download: this.download });
+    });
+    return { blobs, clicked };
+  }
+
+  it.each(['CSV', 'JSON'])('downloads the %s export under the name the server gives', async (label) => {
+    const format = label.toLowerCase();
+    const api = fakeApi({
+      'GET /api/obsidian/status': { body: { enabled: false, lastRun: null } },
+      'GET /api/export': (req) => ({
+        bytes: new TextEncoder().encode(`${req.path} content`),
+        headers: { 'Content-Disposition': `attachment; filename="vocab-olli-2026-10-27.${format}"` },
+      }),
+    });
+    const { blobs, clicked } = captureDownloads();
+    const { user } = renderApp('/settings');
+    await user.click(await screen.findByRole('button', { name: `Export ${label}` }));
+    await waitFor(() => expect(clicked).toHaveLength(1));
+    expect(clicked[0]).toEqual({ href: 'blob:x', download: `vocab-olli-2026-10-27.${format}` });
+    expect(api.callsTo('GET /api/export')[0].path).toBe(`/api/export?format=${format}`);
+    expect(api.callsTo('GET /api/export')[0].headers.get('Authorization')).toBe('Bearer test-token');
+    expect(blobs[0].size).toBeGreaterThan(0);
+  });
+
+  it('falls back to a dated file name without Content-Disposition', async () => {
+    fakeApi({
+      'GET /api/obsidian/status': { body: { enabled: false, lastRun: null } },
+      'GET /api/export': { bytes: new Uint8Array([91, 93]) },
+    });
+    const { clicked } = captureDownloads();
+    const { user } = renderApp('/settings');
+    await user.click(await screen.findByRole('button', { name: 'Export JSON' }));
+    await waitFor(() => expect(clicked).toHaveLength(1));
+    expect(clicked[0].download).toMatch(/^vocab-\d{4}-\d{2}-\d{2}\.json$/);
+  });
+
+  it('shows an export error', async () => {
+    fakeApi({
+      'GET /api/obsidian/status': { body: { enabled: false, lastRun: null } },
+      'GET /api/export': { status: 500, body: { error: 'internal server error' } },
+    });
+    const { user } = renderApp('/settings');
+    await user.click(await screen.findByRole('button', { name: 'Export CSV' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('internal server error');
   });
 });

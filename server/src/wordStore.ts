@@ -14,6 +14,11 @@ export type NewWord = {
   bookTitle?: string | null;
   bookAuthor?: string | null;
   kindleLookupAt?: string | null;
+  notes?: string | null;
+  /** Kept from an imported file; defaults to now. */
+  createdAt?: string | null;
+  /** Kept from an imported file; used only when `status` is learned, defaulting to now. */
+  learnedAt?: string | null;
 };
 
 /** Live (non-deleted) word of a user by its normalised text. */
@@ -31,15 +36,16 @@ export function findWordByText(db: Db, userId: number, word: string): WordRow | 
  * Returns null if a live word with that text already exists.
  */
 export function insertWord(db: Db, userId: number, input: NewWord, ts: string): WordRow | null {
+  const { createdAt, learnedAt, ...rest } = input;
   const status = input.status ?? 'learning';
   const values = {
     bookTitle: null,
     bookAuthor: null,
     kindleLookupAt: null,
     notes: null,
-    ...input,
+    ...rest,
     status,
-    learnedAt: status === 'learned' ? ts : null,
+    learnedAt: status === 'learned' ? (learnedAt ?? ts) : null,
     updatedAt: ts,
   };
   const existing = db
@@ -51,7 +57,7 @@ export function insertWord(db: Db, userId: number, input: NewWord, ts: string): 
   if (existing) {
     return db
       .update(words)
-      .set({ ...values, deletedAt: null })
+      .set({ ...values, ...(createdAt ? { createdAt } : {}), deletedAt: null })
       .where(eq(words.id, existing.id))
       .returning()
       .get();
@@ -59,7 +65,7 @@ export function insertWord(db: Db, userId: number, input: NewWord, ts: string): 
   try {
     return db
       .insert(words)
-      .values({ ...values, userId, createdAt: ts })
+      .values({ ...values, userId, createdAt: createdAt ?? ts })
       .returning()
       .get();
   } catch (err) {

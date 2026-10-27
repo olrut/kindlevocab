@@ -180,11 +180,59 @@ export function ImportPage() {
         {progress && <Progress progress={progress} />}
       </section>
 
-      <section className={styles.section}>
-        <h2>CSV / JSON</h2>
-        <p className={forms.hint}>Import from a CSV or JSON export is not available yet.</p>
-      </section>
+      <FileImport />
     </>
+  );
+}
+
+function FileImport() {
+  const [result, setResult] = useState<{ imported: number; skipped: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function choose(input: HTMLInputElement) {
+    const f = input.files?.[0];
+    if (!f) return;
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    try {
+      setResult(await api.importWords(f));
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+      // Choosing the same file again should upload it again.
+      input.value = '';
+    }
+  }
+
+  return (
+    <section className={styles.section}>
+      <h2>CSV / JSON</h2>
+      <p className={forms.hint}>
+        A file in the format of the export on the Settings page. Words you already have are skipped. Pronunciation and audio are
+        looked up in the background.
+      </p>
+      <div className={forms.form}>
+        <label>
+          CSV or JSON file
+          <input type="file" accept=".csv,.json" disabled={busy} onChange={(e) => choose(e.target)} />
+        </label>
+      </div>
+      {busy && <p>Importing…</p>}
+      {result && (
+        <p>
+          Imported {result.imported} {result.imported === 1 ? 'word' : 'words'}; {result.skipped} already existed and{' '}
+          {result.skipped === 1 ? 'was' : 'were'} skipped.
+        </p>
+      )}
+      {error && (
+        <p role="alert" className={forms.error}>
+          {error}
+        </p>
+      )}
+    </section>
   );
 }
 
