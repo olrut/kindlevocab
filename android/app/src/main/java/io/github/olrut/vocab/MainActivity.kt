@@ -15,6 +15,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.activity.compose.BackHandler
 import io.github.olrut.vocab.ui.EditScreen
+import io.github.olrut.vocab.ui.ImportScreen
 import io.github.olrut.vocab.ui.ReviewScreen
 import io.github.olrut.vocab.ui.VocabTheme
 import io.github.olrut.vocab.ui.WordsScreen
@@ -48,6 +49,7 @@ class MainActivity : ComponentActivity() {
                             onPlay = { word -> scope.launch { vm.speaker.say(word, vm.audio) } },
                             onAdd = vm::addWord,
                             onWords = vm::showWords,
+                            onImport = vm::showImport,
                             display = display,
                             onTheme = vm.display::setTheme,
                             onSize = vm.display::setSize,
@@ -58,6 +60,13 @@ class MainActivity : ComponentActivity() {
                             onFilter = vm::filterWords,
                             onOpen = vm::editWord,
                             onAdd = vm::addWord,
+                            onBack = { vm.back() },
+                        )
+                        Screen.Import -> ImportScreen(
+                            vm.imports,
+                            onKindle = vm::openKindle,
+                            onFile = vm::importFile,
+                            onExport = vm::export,
                             onBack = { vm.back() },
                         )
                         is Screen.Editor -> EditScreen(

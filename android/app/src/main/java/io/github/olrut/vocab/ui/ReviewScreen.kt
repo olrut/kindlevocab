@@ -78,6 +78,7 @@ fun ReviewScreen(
     onPlay: (Word) -> Unit,
     onAdd: () -> Unit,
     onWords: () -> Unit,
+    onImport: () -> Unit,
     display: Display,
     onTheme: (ThemeMode) -> Unit,
     onSize: (TextSize) -> Unit,
@@ -121,11 +122,12 @@ fun ReviewScreen(
             when {
                 word != null -> Card(word, state.revealed, display.size, controller, onPlay)
                 state.loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
-                else -> Empty(onAdd = onAdd, onWords = onWords)
+                else -> Empty(onAdd = onAdd, onImport = onImport)
             }
             Menu(
                 onAdd = onAdd,
                 onWords = onWords,
+                onImport = onImport,
                 onDisplay = { showDisplay = true },
                 modifier = Modifier.align(Alignment.TopEnd).safeDrawingPadding(),
             )
@@ -217,22 +219,23 @@ private fun Card(word: Word, revealed: Boolean, textSize: TextSize, controller: 
 }
 
 @Composable
-private fun Empty(onAdd: () -> Unit, onWords: () -> Unit) {
+private fun Empty(onAdd: () -> Unit, onImport: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
         Text("No words to learn. Add a word, or import your Kindle's vocabulary.", style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
         Button(onClick = onAdd, modifier = Modifier.padding(top = 16.dp)) { Text("Add a word") }
-        TextButton(onClick = onWords) { Text("All words") }
+        TextButton(onClick = onImport) { Text("Import from Kindle") }
     }
 }
 
 @Composable
-private fun Menu(onAdd: () -> Unit, onWords: () -> Unit, onDisplay: () -> Unit, modifier: Modifier) {
+private fun Menu(onAdd: () -> Unit, onWords: () -> Unit, onImport: () -> Unit, onDisplay: () -> Unit, modifier: Modifier) {
     var open by remember { mutableStateOf(false) }
     Box(modifier) {
         IconButton(onClick = { open = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "Menu") }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             DropdownMenuItem(text = { Text("Add a word") }, onClick = { open = false; onAdd() })
             DropdownMenuItem(text = { Text("Words") }, onClick = { open = false; onWords() })
+            DropdownMenuItem(text = { Text("Import / export") }, onClick = { open = false; onImport() })
             DropdownMenuItem(text = { Text("Display…") }, onClick = { open = false; onDisplay() })
         }
     }

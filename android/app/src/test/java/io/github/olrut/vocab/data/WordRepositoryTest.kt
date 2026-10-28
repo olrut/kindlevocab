@@ -173,6 +173,47 @@ class WordRepositoryTest {
     }
 
     @Test
+    fun `import adds new words, skips existing ones and repeats, keeps given dates`() = runTest {
+        repo.add(draft(word = "old"))
+        val result = repo.importAll(
+            listOf(
+                WordDraft("New", "d", source = Word.SOURCE_IMPORT, status = Word.LEARNED, createdAt = "2025-01-01T00:00:00.000Z", learnedAt = "2025-02-01T00:00:00.000Z"),
+                WordDraft("old", "x"),
+                WordDraft("NEW", "again"),
+                WordDraft("plain"),
+            ),
+        )
+        assertEquals(listOf("new", "plain"), result.added.map { it.word })
+        assertEquals(2, result.skipped)
+        val n = db.dao().find("new")!!
+        assertEquals("2025-01-01T00:00:00.000Z", n.createdAt)
+        assertEquals("2025-02-01T00:00:00.000Z", n.learnedAt)
+        assertEquals("2026-03-01T10:00:00.000Z", n.updatedAt)
+        assertEquals(Word.SOURCE_IMPORT, n.source)
+        assertEquals("2026-03-01T10:00:00.000Z", db.dao().find("plain")!!.createdAt)
+    }
+
+    @Test
+    fun `an invalid draft aborts the whole import`() = runTest {
+        try {
+            repo.importAll(listOf(WordDraft("fine"), WordDraft(" ")))
+            fail("expected the import to fail")
+        } catch (e: InvalidWordException) {
+            // expected
+        }
+        assertTrue(db.dao().all().isEmpty())
+    }
+
+    @Test
+    fun `fill pronunciation only sets what is missing`() = runTest {
+        val a = repo.add(draft(word = "a").copy(ipa = "/a/"))
+        repo.fillPronunciation(a.id, "/other/", "https://x/a.mp3")
+        val w = db.dao().get(a.id)!!
+        assertEquals("/a/", w.ipa)
+        assertEquals("https://x/a.mp3", w.audioUrl)
+    }
+
+    @Test
     fun `contains matches the normalised word`() = runTest {
         repo.add(draft())
         assertTrue(repo.contains(" SerenDipity"))
