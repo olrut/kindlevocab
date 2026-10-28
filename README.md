@@ -12,12 +12,12 @@ Turn your Kindle lookups into flashcards: an Android app that imports the words 
 
 The app needs Android 8.0 or newer.
 
-1. **Get the APK**, either way:
-   - From GitHub: repository → **Actions** → the latest successful **android** run on `main` → **Artifacts** → `app-debug`. It downloads as a zip; unzip it to get `app-debug.apk`.
-   - Or build it: `cd android && ./gradlew assembleDebug` (JDK 17 and the Android SDK). The APK is in `app/build/outputs/apk/debug/`.
-2. Copy the APK to the phone and open it. Android asks you to allow installs from that app (Files, Chrome, …); allow it. Play Protect may warn about an unknown app (it is signed with a debug key); choose to install anyway.
+1. On the phone, open the repository's **[Releases](../../releases/latest)** and download `kindlevocab-vX.Y.Z.apk`.
+2. Open it. Android asks you to allow installs from that app (Chrome, Files, …); allow it. Play Protect may warn about an app it does not know; choose to install anyway.
 
-To update, install the new APK over the old one. Your words are kept.
+To update, install the newer release over the old one. Your words are kept.
+
+**Coming from a debug build** (an `app-debug` artifact from Actions): it is signed with a different key, so Android will not install the release over it. Export your words first (**Import / export → Export CSV**), uninstall the debug app, install the release and import the CSV.
 
 ## Import from your Kindle
 
@@ -26,6 +26,28 @@ To update, install the new APK over the old one. Your words are kept.
 3. Pick the words and tap **Import**. The next time, only words new since the last import are offered.
 
 Each word needs a dictionary lookup, so the import needs a network connection. Words the dictionary does not know come in without a definition; add one under **Words**.
+
+## Releases
+
+A release is built by GitHub Actions when a tag `v<versionName>` is pushed (`.github/workflows/release.yml`): it runs the tests, signs the APK with the release key and attaches it to a GitHub release.
+
+One-time setup, the release key (keep the `.jks` file and passwords safe outside the repository: without them no update can be installed over an existing install):
+
+```sh
+keytool -genkeypair -v -keystore vocab-release.jks -alias vocab -keyalg RSA -keysize 4096 -validity 10000
+gh secret set KEYSTORE_BASE64 < <(base64 -w0 vocab-release.jks)   # macOS: base64 -i vocab-release.jks
+gh secret set KEYSTORE_PASSWORD
+gh secret set KEY_ALIAS --body vocab
+gh secret set KEY_PASSWORD
+```
+
+Each release: raise `versionCode` and `versionName` in `android/app/build.gradle.kts`, merge, then:
+
+```sh
+git tag v2.0.0 && git push origin v2.0.0
+```
+
+The build fails if the tag does not match `versionName`. Pull requests and `main` still get a debug APK (`app-debug` artifact of the **android** workflow) for testing.
 
 ## Moving from version 1
 

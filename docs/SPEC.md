@@ -103,7 +103,8 @@ A back stack; the system back button pops it.
 
 - `cd android && ./gradlew testDebugUnitTest assembleDebug` (JDK 17, Android SDK 35). Min SDK 26.
 - CI (`.github/workflows/android.yml`) runs the tests and uploads the debug APK as the `app-debug` artifact on every push and pull request.
-- The APK is signed with the debug key; a new one installs over the old one and keeps the words.
+- Releases: pushing a tag `v<versionName>` runs `.github/workflows/release.yml`: tests, `assembleRelease` signed with the release key, and a GitHub release with `kindlevocab-v<version>.apk`. The key comes from repository secrets (`KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`) through the `VOCAB_KEYSTORE*` / `VOCAB_KEY_*` environment variables; without them `assembleRelease` builds an unsigned APK. The tag must match `versionName`; `versionCode` must grow with every release.
+- A release installs over an older release and keeps the words. Debug builds are signed with another key and cannot be updated to a release in place (export, uninstall, install, import).
 
 ## 8. Build order
 

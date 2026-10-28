@@ -18,9 +18,24 @@ android {
         versionName = "2.0.0"
     }
 
+    // The release key comes from the environment (CI secrets, docs/SPEC.md § 7); never from the repo.
+    // Without it, assembleRelease builds an unsigned APK.
+    val keystore = System.getenv("VOCAB_KEYSTORE")?.let { file(it) }?.takeIf { it.exists() }
+    signingConfigs {
+        if (keystore != null) {
+            create("release") {
+                storeFile = keystore
+                storePassword = System.getenv("VOCAB_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("VOCAB_KEY_ALIAS")
+                keyPassword = System.getenv("VOCAB_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release")
         }
     }
     compileOptions {
