@@ -60,15 +60,29 @@ class ApiClientTest {
                "bookAuthor":null,"notes":null,"createdAt":"a","updatedAt":"b","deletedAt":null,"future":1}]""",
         )
         val words = api.words("learning")
-        assertEquals(Word(42, "ubiquitous", "everywhere", "It is.", "kaikkialla", "/x/", true, "learning"), words.single())
+        assertEquals(Word(42, "ubiquitous", "everywhere", "It is.", "kaikkialla", "/x/", true, "learning", updatedAt = "b"), words.single())
         val req = server.takeRequest()
         assertEquals("/api/words?status=learning", req.path)
         assertEquals("Bearer tok", req.getHeader("Authorization"))
     }
 
     @Test
+    fun `reads changes since a time, deleted words included`() = runTest {
+        reply(
+            """{"serverTime":"2026-10-01T10:00:00.000Z","words":[
+               {"id":1,"word":"a","definition":"d","status":"learned","learnedAt":"2026-10-01T09:00:00.000Z","updatedAt":"2026-10-01T09:00:00.000Z","deletedAt":null},
+               {"id":2,"word":"b","definition":"d","status":"learning","updatedAt":"2026-10-01T09:30:00.000Z","deletedAt":"2026-10-01T09:30:00.000Z"}]}""",
+        )
+        val changes = api.changes("2026-09-30T00:00:00.000Z")
+        assertEquals("2026-10-01T10:00:00.000Z", changes.serverTime)
+        assertEquals("2026-10-01T09:00:00.000Z", changes.words[0].learnedAt)
+        assertEquals("2026-10-01T09:30:00.000Z", changes.words[1].deletedAt)
+        assertEquals("/api/words/changes?since=2026-09-30T00%3A00%3A00.000Z", server.takeRequest().path)
+    }
+
+    @Test
     fun `patches only the status`() = runTest {
-        reply("""{"id":42,"word":"w","definition":"d","status":"learned"}""")
+        reply("""{"id":42,"word":"w","definition":"d","status":"learned","updatedAt":"t"}""")
         api.setStatus(42, StatusPatch("learned"))
         val req = server.takeRequest()
         assertEquals("PATCH", req.method)

@@ -34,6 +34,9 @@ interface VocabApi {
     @GET("words")
     suspend fun words(@Query("status") status: String): List<Word>
 
+    @GET("words/changes")
+    suspend fun changes(@Query("since") since: String): Changes
+
     @PATCH("words/{id}")
     suspend fun setStatus(@Path("id") id: Long, @Body body: StatusPatch): Word
 
@@ -56,7 +59,7 @@ data class LoggedInUser(val id: Long, val name: String)
 @Serializable
 data class StatusPatch(val status: String)
 
-/** The fields of the server's word JSON that the review screen needs. */
+/** The fields of the server's word JSON that the app keeps (docs/SPEC.md § 6). */
 @Serializable
 data class Word(
     val id: Long,
@@ -67,7 +70,13 @@ data class Word(
     val ipa: String? = null,
     val hasAudio: Boolean = false,
     val status: String = "learning",
+    val learnedAt: String? = null,
+    val updatedAt: String,
+    val deletedAt: String? = null,
 )
+
+@Serializable
+data class Changes(val serverTime: String, val words: List<Word>)
 
 private val json = Json {
     ignoreUnknownKeys = true

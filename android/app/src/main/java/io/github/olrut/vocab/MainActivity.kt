@@ -37,7 +37,7 @@ class MainActivity : ComponentActivity() {
                         is Screen.Review -> ReviewScreen(
                             s.controller,
                             s.userName,
-                            onPlay = { word -> vm.api?.let { api -> scope.launch { vm.speaker.say(word, api) } } },
+                            onPlay = { word -> scope.launch { vm.speaker.say(word, s.audio) } },
                             onSwitchUser = vm::switchUser,
                         )
                     }

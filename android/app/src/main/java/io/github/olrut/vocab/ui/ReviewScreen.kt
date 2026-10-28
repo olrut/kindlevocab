@@ -67,7 +67,7 @@ fun ReviewScreen(controller: ReviewController, userName: String, onPlay: (Word) 
     val state by controller.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
 
-    // Reload whenever the app comes back to the front: words added on the web show up.
+    // Sync whenever the app comes back to the front: words added on the web show up.
     LifecycleResumeEffect(controller) {
         controller.load()
         onPauseOrDispose {}
@@ -101,10 +101,11 @@ fun ReviewScreen(controller: ReviewController, userName: String, onPlay: (Word) 
             val word = state.deck.current
             when {
                 word != null -> Card(word, state.revealed, controller, onPlay)
-                state.loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
-                else -> Empty(onSync = controller::load)
+                state.loading || state.syncing -> CircularProgressIndicator(Modifier.align(Alignment.Center))
+                else -> Empty(onSync = controller::syncNow)
             }
-            Menu(userName, onSync = controller::load, onSwitchUser = onSwitchUser, modifier = Modifier.align(Alignment.TopEnd).safeDrawingPadding())
+            state.notSynced?.let { NotSynced(it, Modifier.align(Alignment.TopStart).safeDrawingPadding()) }
+            Menu(userName, onSync = controller::syncNow, onSwitchUser = onSwitchUser, modifier = Modifier.align(Alignment.TopEnd).safeDrawingPadding())
         }
     }
 }
@@ -188,6 +189,17 @@ private fun Empty(onSync: () -> Unit) {
         Text("No words to learn. Add words in the web app.", style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
         Button(onClick = onSync, modifier = Modifier.padding(top = 16.dp)) { Text("Sync") }
     }
+}
+
+/** The last sync failed; what is shown and marked here is kept and sent on a later sync. */
+@Composable
+private fun NotSynced(reason: String, modifier: Modifier) {
+    Text(
+        "Not synced · $reason",
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+    )
 }
 
 @Composable

@@ -233,27 +233,28 @@ Screens:
   - Tap: reveal definition, example, finnish, IPA; play button (local mp3 if cached, else Android `TextToSpeech` en-US).
   - Swipe left or right (horizontal drag > 25 % of width, velocity threshold): next word.
   - Swipe down (vertical drag > 25 % of height): mark learned, advance, show a 3-second snackbar "Marked as learned — Undo".
-  - Order: shuffle the learning list on screen entry and whenever it is exhausted; then start over.
+  - Order: shuffle the learning list on screen entry and whenever it is exhausted; then start over. A sync does not restart the pass: words keep their place, words gone from the list drop out, new words go somewhere after the current word.
   - Empty list: "No words to learn. Add words in the web app." plus a sync button.
-- Small overflow menu: Sync now, Switch user (calls `POST /auth/logout`, best effort, and forgets the token).
+- Small overflow menu: Sync now, Switch user (tries a sync for up to 5 s, then calls `POST /auth/logout`, best effort, and forgets the token; changes still pending stay in that user's local database for their next login).
 
-Phase 8 (online only) reads `GET /words?status=learning` on entry, whenever the app returns to the front, and on Sync; the current word stays in front across a reload. Marking learned removes the word at once and sends `PATCH /words/:id { status: "learned" }`; if that fails the word comes back with an error. Undo puts it back as the current word and sends `{ status: "learning" }`; patches go out one at a time, in order. The play button downloads `GET /audio/:id` into the cache dir on first use when `hasAudio`, else (or on failure) uses TextToSpeech. Phase 9 replaces the direct patches with the Room cache and `pending_changes` below.
+The play button uses the recording in the cache dir when there is one, downloads `GET /audio/:id` on first use when `hasAudio`, else (or on failure) uses TextToSpeech.
 
-Local storage (Room):
+Local storage (Room), one database per server and user (`words-<hash>.db`), recordings in `cacheDir/audio/<hash>/<id>.mp3`:
 ```
-words(id, word, definition, example, finnish, ipa, hasAudio, status, learnedAt, updatedAt, deletedAt)
-pending_changes(id, wordId, status, changedAt)
+words(id, word, definition, example, finnish, ipa, hasAudio, status, learnedAt, updatedAt)   -- live words only
+pending_changes(id, wordId, status, changedAt)   -- at most one per word
 sync_state(lastSync)
 ```
 
-Sync (on app start, on foreground, and manually):
-1. Push: for each `pending_changes` row, `PATCH /words/:id { status }`; delete the row on 2xx or 404.
-2. Pull: `GET /words/changes?since=lastSync`; upsert rows; remove rows with `deletedAt`; set `lastSync = serverTime`.
-3. Audio: for words with `hasAudio` and no local file, download `GET /audio/:id` into app cache dir (best effort, background).
+Marking learned and undo never call the API directly: they change `words` and `pending_changes` in one transaction, so offline and online behave identically. A change that reverses the word's pending change (undo before the push) deletes that row instead; otherwise a row is added (undo after the push adds `status: learning`). Timestamps are written like the server's (UTC, milliseconds).
 
-Conflict rule: last `updatedAt` wins. Undo removes the pending row before it is pushed; if it was already pushed, push `status: learning` instead.
+Sync (on screen entry, when the app returns to the front, after each learned/undo, and manually), one at a time with the local changes:
+1. Pull: `GET /words/changes?since=lastSync` (the epoch on the first sync).
+2. Push: for each `pending_changes` row in order — if the pulled rows include its word with `updatedAt` later than `changedAt`, the word was changed elsewhere afterwards: delete the row and send nothing (last `updatedAt` wins). Otherwise `PATCH /words/:id { status }`; delete the row on 2xx or 404 (404 also removes the local word). Any other failure keeps the row and ends this sync with `lastSync` unchanged.
+3. Apply: upsert the pulled rows, then the PATCH replies (newer); remove rows with `deletedAt`, with their pending row and recording; set `lastSync = serverTime`.
+4. Audio: for words with `hasAudio` and no local file, download `GET /audio/:id` (best effort, background, one pass at a time).
 
-The "learned" gesture never calls the API directly; it writes to Room and `pending_changes`, so offline and online behave identically.
+The review screen shows the local words at once and reads them again after each sync. When a sync fails, a small "Not synced · <reason>" note stays up until one succeeds; only "Sync now" also shows the error in a snackbar.
 
 ## 7. Obsidian export
 

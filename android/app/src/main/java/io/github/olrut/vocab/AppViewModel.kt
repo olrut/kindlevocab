@@ -10,27 +10,41 @@ import io.github.olrut.vocab.api.VocabApi
 import io.github.olrut.vocab.api.apiBaseUrl
 import io.github.olrut.vocab.api.createApi
 import io.github.olrut.vocab.api.errorMessage
+import io.github.olrut.vocab.audio.AudioCache
 import io.github.olrut.vocab.audio.Speaker
+import io.github.olrut.vocab.data.Repository
+import io.github.olrut.vocab.data.VocabDb
 import io.github.olrut.vocab.review.ReviewController
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
+import java.io.File
+import java.security.MessageDigest
 
 sealed interface Screen {
     data class Server(val input: String, val checking: Boolean = false, val error: String? = null) : Screen
     data class Users(val users: List<User>? = null, val error: String? = null, val busy: Boolean = false) : Screen
-    data class Review(val userName: String, val controller: ReviewController) : Screen
+    data class Review(val userName: String, val controller: ReviewController, val audio: AudioCache) : Screen
 }
 
 /** Which screen is showing, and the session behind it. Survives rotation. */
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val session = Session(app)
     val speaker = Speaker(app)
-    var api: VocabApi? = null
-        private set
+    private var api: VocabApi? = null
+
+    /** The logged-in user's local store, open while the review screen is. */
+    private var db: VocabDb? = null
+    private var repository: Repository? = null
+    private var accountScope: CoroutineScope? = null
 
     private val _screen = MutableStateFlow<Screen>(Screen.Server(session.server ?: "https://"))
     val screen: StateFlow<Screen> = _screen.asStateFlow()
@@ -41,8 +55,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (base != null) {
             api = buildApi(base)
             val token = session.token
+            val id = session.userId
             val name = session.userName
-            if (token != null && name != null) startReview(name) else showUsers()
+            if (token != null && id != null && name != null) startReview(id, name) else showUsers()
         }
     }
 
@@ -76,11 +91,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun changeServer() {
+        closeAccount()
         session.logOut()
         _screen.value = Screen.Server(session.server ?: "https://")
     }
 
     fun showUsers(error: String? = null) {
+        closeAccount()
         val api = api ?: return changeServer()
         _screen.value = Screen.Users(error = error)
         viewModelScope.launch {
@@ -101,8 +118,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val res = api.login(LoginRequest(userId = user.id, pin = pin?.takeIf { user.hasPin }, device = "android:${Build.MODEL}"))
-                session.logIn(res.token, res.user.name)
-                startReview(res.user.name)
+                session.logIn(res.token, res.user.id, res.user.name)
+                startReview(res.user.id, res.user.name)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -111,15 +128,40 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** The review screen loads the list itself whenever it comes to the front. */
-    private fun startReview(name: String) {
-        _screen.value = Screen.Review(name, ReviewController(api!!, viewModelScope))
+    /** The review screen syncs itself whenever it comes to the front. */
+    private fun startReview(userId: Long, name: String) {
+        val app = getApplication<Application>()
+        val api = api!!
+        // Words, pending changes and recordings are kept per server and user.
+        val account = MessageDigest.getInstance("SHA-256")
+            .digest("${apiBaseUrl(session.server!!)}|$userId".toByteArray())
+            .take(8).joinToString("") { "%02x".format(it) }
+        val audio = AudioCache(File(app.cacheDir, "audio/$account"), api)
+        val db = VocabDb.open(app, account)
+        // The store's work stops before its database closes (switching users).
+        val scope = CoroutineScope(viewModelScope.coroutineContext + SupervisorJob(viewModelScope.coroutineContext[Job]))
+        val repository = Repository(db, api, audio, scope)
+        this.db = db
+        this.repository = repository
+        this.accountScope = scope
+        _screen.value = Screen.Review(name, ReviewController(repository, scope), audio)
+    }
+
+    private fun closeAccount() {
+        accountScope?.cancel()
+        db?.close()
+        accountScope = null
+        db = null
+        repository = null
     }
 
     fun switchUser() {
         val api = api
+        val repository = repository
         viewModelScope.launch {
-            // Best effort: the token is forgotten here either way.
+            // Best effort: send what is pending while the token still works. Anything left stays
+            // in this user's database for their next login. The token is forgotten either way.
+            runCatching { withTimeout(5_000) { repository?.sync() } }
             runCatching { api?.logout() }
             session.logOut()
             showUsers()
@@ -127,6 +169,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        closeAccount()
         speaker.release()
     }
 }

@@ -23,14 +23,17 @@ class Session(context: Context) {
 
     val token: String? get() = prefs.getString("token", null)
     val userName: String? get() = prefs.getString("userName", null)
+    val userId: Long? get() = prefs.getLong("userId", -1).takeIf { it >= 0 }
 
-    fun logIn(token: String, userName: String) = prefs.edit {
+    fun logIn(token: String, userId: Long, userName: String) = prefs.edit {
         putString("token", token)
+        putLong("userId", userId)
         putString("userName", userName)
     }
 
     fun logOut() = prefs.edit {
         remove("token")
+        remove("userId")
         remove("userName")
     }
 }

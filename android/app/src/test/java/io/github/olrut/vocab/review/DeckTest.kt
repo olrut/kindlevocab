@@ -9,7 +9,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.random.Random
 
-fun word(id: Long, text: String = "w$id") = Word(id = id, word = text, definition = "def of $text")
+fun word(id: Long, text: String = "w$id") = Word(id = id, word = text, definition = "def of $text", updatedAt = "2026-01-01T00:00:00.000Z")
 
 class DeckTest {
     private val words = (1L..5L).map { word(it) }
@@ -124,10 +124,54 @@ class DeckTest {
     }
 
     @Test
-    fun `reload without the current word starts a new shuffle`() {
+    fun `reload keeps the pass where it was, words shown and words ahead`() {
+        var deck = Deck.of(words, Random(4))
+        deck = deck.next(Random(0)).next(Random(0))
+        val reloaded = deck.reload(words.shuffled(Random(9)), Random(0))
+        assertEquals(deck, reloaded)
+    }
+
+    @Test
+    fun `new words go into the part of the pass not shown yet, never before the current word`() {
+        var deck = Deck.of(words, Random(4))
+        deck = deck.next(Random(0))
+        for (seed in 0..20) {
+            val reloaded = deck.reload(words + word(8) + word(9), Random(seed))
+            assertEquals(deck.queue.take(2), reloaded.queue.take(2))
+            assertEquals(1, reloaded.pos)
+            assertEquals(7, reloaded.queue.size)
+            assertEquals(setOf(8L, 9L), reloaded.queue.drop(2).map { it.id }.toSet() - deck.queue.map { it.id }.toSet())
+        }
+    }
+
+    @Test
+    fun `new words can land anywhere ahead, also right after the current word`() {
         val deck = Deck.of(words, Random(4))
+        val places = (0..40).map { seed -> deck.reload(words + word(9), Random(seed)).queue.indexOfFirst { it.id == 9L } }.toSet()
+        assertEquals((1..5).toSet(), places)
+    }
+
+    @Test
+    fun `reload without the current word moves on to the next one`() {
+        val deck = Deck.of(words, Random(4))
+        val reloaded = deck.reload(words.filter { it.id != deck.current!!.id }, Random(0))
+        assertEquals(deck.queue[1], reloaded.current)
+        assertEquals(4, reloaded.queue.size)
+    }
+
+    @Test
+    fun `reload that leaves nothing ahead starts a new pass`() {
+        var deck = Deck.of(words, Random(4))
+        repeat(4) { deck = deck.next(Random(0)) }
         val reloaded = deck.reload(words.filter { it.id != deck.current!!.id }, Random(0))
         assertEquals(0, reloaded.pos)
         assertEquals(4, reloaded.queue.size)
+    }
+
+    @Test
+    fun `reload of an empty deck shuffles what arrived`() {
+        val reloaded = Deck.of(emptyList(), Random(0)).reload(words, Random(0))
+        assertEquals(words.toSet(), reloaded.queue.toSet())
+        assertEquals(0, reloaded.pos)
     }
 }
