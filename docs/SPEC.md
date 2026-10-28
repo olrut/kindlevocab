@@ -344,6 +344,8 @@ APP_GID=1000
 
 Image (`server/Dockerfile`, Node 22 bookworm-slim, three stages): build the web UI into `public/`; `npm ci --omit=dev` for the server (with python3/make/g++ only in that stage, for better-sqlite3); the runtime stage runs `node --import tsx src/index.ts` as the given user. `tsx` is therefore a runtime dependency. Migrations run at startup (`openDb`). `GET /api/health` → `{ ok: true }` (no auth) backs the image's `HEALTHCHECK`. On SIGTERM/SIGINT the server stops accepting requests, writes the pending Obsidian export and exits, so `docker stop` is immediate.
 
+Step-by-step instructions, including the Android app, backups and troubleshooting: `docs/DEPLOY.md`.
+
 First run on the VM:
 ```
 git clone … && cd kindlevocab
