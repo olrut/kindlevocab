@@ -48,6 +48,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
@@ -61,7 +62,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import io.github.olrut.vocab.api.Word
+import io.github.olrut.vocab.data.Word
 import io.github.olrut.vocab.review.ReviewController
 import io.github.olrut.vocab.review.Swipe
 import io.github.olrut.vocab.review.decideSwipe
@@ -74,9 +75,9 @@ private const val UNDO_MS = 3000L
 @Composable
 fun ReviewScreen(
     controller: ReviewController,
-    userName: String,
     onPlay: (Word) -> Unit,
-    onSwitchUser: () -> Unit,
+    onAdd: () -> Unit,
+    onWords: () -> Unit,
     display: Display,
     onTheme: (ThemeMode) -> Unit,
     onSize: (TextSize) -> Unit,
@@ -85,7 +86,7 @@ fun ReviewScreen(
     val snackbar = remember { SnackbarHostState() }
     var showDisplay by remember { mutableStateOf(false) }
 
-    // Sync whenever the app comes back to the front: words added on the web show up.
+    // Read the words again whenever the screen comes back: they may have been added or edited.
     LifecycleResumeEffect(controller) {
         controller.load()
         onPauseOrDispose {}
@@ -119,15 +120,13 @@ fun ReviewScreen(
             val word = state.deck.current
             when {
                 word != null -> Card(word, state.revealed, display.size, controller, onPlay)
-                state.loading || state.syncing -> CircularProgressIndicator(Modifier.align(Alignment.Center))
-                else -> Empty(onSync = controller::syncNow)
+                state.loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
+                else -> Empty(onAdd = onAdd, onWords = onWords)
             }
-            state.notSynced?.let { NotSynced(it, Modifier.align(Alignment.TopStart).safeDrawingPadding()) }
             Menu(
-                userName,
-                onSync = controller::syncNow,
+                onAdd = onAdd,
+                onWords = onWords,
                 onDisplay = { showDisplay = true },
-                onSwitchUser = onSwitchUser,
                 modifier = Modifier.align(Alignment.TopEnd).safeDrawingPadding(),
             )
         }
@@ -195,7 +194,12 @@ private fun Card(word: Word, revealed: Boolean, textSize: TextSize, controller: 
             if (revealed) {
                 if (word.ipa != null) Text(word.ipa, style = MaterialTheme.typography.titleMedium.scaled(k), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 FilledTonalIconButton(onClick = { onPlay(word) }) { Icon(Icons.Filled.PlayArrow, contentDescription = "Play") }
-                Text(word.definition, style = MaterialTheme.typography.titleLarge.scaled(k), textAlign = TextAlign.Center)
+                Text(
+                    word.definition ?: "No definition yet. Add one under Words.",
+                    style = MaterialTheme.typography.titleLarge.scaled(k),
+                    color = if (word.definition == null) MaterialTheme.colorScheme.onSurfaceVariant else Color.Unspecified,
+                    textAlign = TextAlign.Center,
+                )
                 if (word.example != null) Text(word.example, style = MaterialTheme.typography.bodyLarge.scaled(k), fontStyle = FontStyle.Italic, textAlign = TextAlign.Center)
                 if (word.finnish != null) Text(word.finnish, style = MaterialTheme.typography.titleMedium.scaled(k), color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center)
             }
@@ -213,33 +217,23 @@ private fun Card(word: Word, revealed: Boolean, textSize: TextSize, controller: 
 }
 
 @Composable
-private fun Empty(onSync: () -> Unit) {
+private fun Empty(onAdd: () -> Unit, onWords: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Text("No words to learn. Add words in the web app.", style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
-        Button(onClick = onSync, modifier = Modifier.padding(top = 16.dp)) { Text("Sync") }
+        Text("No words to learn. Add a word, or import your Kindle's vocabulary.", style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+        Button(onClick = onAdd, modifier = Modifier.padding(top = 16.dp)) { Text("Add a word") }
+        TextButton(onClick = onWords) { Text("All words") }
     }
 }
 
-/** The last sync failed; what is shown and marked here is kept and sent on a later sync. */
 @Composable
-private fun NotSynced(reason: String, modifier: Modifier) {
-    Text(
-        "Not synced · $reason",
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-    )
-}
-
-@Composable
-private fun Menu(userName: String, onSync: () -> Unit, onDisplay: () -> Unit, onSwitchUser: () -> Unit, modifier: Modifier) {
+private fun Menu(onAdd: () -> Unit, onWords: () -> Unit, onDisplay: () -> Unit, modifier: Modifier) {
     var open by remember { mutableStateOf(false) }
     Box(modifier) {
         IconButton(onClick = { open = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "Menu") }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(text = { Text("Sync now") }, onClick = { open = false; onSync() })
+            DropdownMenuItem(text = { Text("Add a word") }, onClick = { open = false; onAdd() })
+            DropdownMenuItem(text = { Text("Words") }, onClick = { open = false; onWords() })
             DropdownMenuItem(text = { Text("Display…") }, onClick = { open = false; onDisplay() })
-            DropdownMenuItem(text = { Text("Switch user ($userName)") }, onClick = { open = false; onSwitchUser() })
         }
     }
 }

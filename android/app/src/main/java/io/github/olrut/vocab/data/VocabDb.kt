@@ -10,89 +10,104 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
-import androidx.room.Upsert
-import io.github.olrut.vocab.api.Word
+import androidx.room.Update
+import kotlinx.coroutines.flow.Flow
 
-/** The local copy of the user's live words (learning and learned). Deleted words are removed. */
-@Entity(tableName = "words", indices = [Index("status")])
-data class WordRow(
-    @PrimaryKey val id: Long,
-    val word: String,
-    val definition: String,
-    val example: String?,
-    val finnish: String?,
-    val ipa: String?,
-    val hasAudio: Boolean,
-    val status: String,
-    val learnedAt: String?,
-    val updatedAt: String,
-)
-
-/** A status change the server has not seen yet. At most one per word. */
-@Entity(tableName = "pending_changes", indices = [Index("wordId")])
-data class PendingChange(
+/** A word on the user's list (docs/SPEC.md § 2). The phone holds the only copy. */
+@Entity(tableName = "words", indices = [Index("word", unique = true), Index("status")])
+data class Word(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val wordId: Long,
-    val status: String,
-    val changedAt: String,
-)
+    /** Lowercased, trimmed, unique. */
+    val word: String,
+    /** Null for a Kindle word the dictionary did not know, until the user writes one. */
+    val definition: String? = null,
+    val example: String? = null,
+    val finnish: String? = null,
+    val ipa: String? = null,
+    /** The dictionary's recording; downloaded into the audio cache when first played. */
+    val audioUrl: String? = null,
+    val source: String = SOURCE_MANUAL,
+    val status: String = LEARNING,
+    val learnedAt: String? = null,
+    val bookTitle: String? = null,
+    val bookAuthor: String? = null,
+    val kindleLookupAt: String? = null,
+    val notes: String? = null,
+    val createdAt: String = "",
+    val updatedAt: String = "",
+) {
+    companion object {
+        const val LEARNING = "learning"
+        const val LEARNED = "learned"
+        const val SOURCE_MANUAL = "manual"
+        const val SOURCE_DICTIONARY = "dictionary"
+        const val SOURCE_IMPORT = "import"
+        const val SOURCE_KINDLE = "kindle"
+    }
+}
 
-@Entity(tableName = "sync_state")
-data class SyncState(@PrimaryKey val id: Int = 0, val lastSync: String)
+/** One finished Kindle import; the newest lookup time in it is where "only new" starts next time. */
+@Entity(tableName = "kindle_imports")
+data class KindleImport(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val importedAt: String,
+    /** Kindle's timestamp (ms since the epoch) of the newest lookup taken in. */
+    val lastKindleTimestamp: Long,
+)
 
 @Dao
 interface VocabDao {
     @Query("SELECT * FROM words WHERE status = 'learning'")
-    suspend fun learning(): List<WordRow>
+    suspend fun learning(): List<Word>
+
+    /** [status] null: every word. Newest first. */
+    @Query("SELECT * FROM words WHERE (:status IS NULL OR status = :status) ORDER BY createdAt DESC, id DESC")
+    fun observe(status: String?): Flow<List<Word>>
+
+    @Query("SELECT * FROM words ORDER BY createdAt, id")
+    suspend fun all(): List<Word>
 
     @Query("SELECT * FROM words WHERE id = :id")
-    suspend fun word(id: Long): WordRow?
+    suspend fun get(id: Long): Word?
 
-    @Query("SELECT * FROM words WHERE hasAudio")
-    suspend fun withAudio(): List<WordRow>
+    @Query("SELECT * FROM words WHERE word = :word")
+    suspend fun find(word: String): Word?
 
-    @Upsert
-    suspend fun upsert(row: WordRow)
-
-    @Query("DELETE FROM words WHERE id = :id")
-    suspend fun deleteWord(id: Long)
-
-    @Query("UPDATE words SET status = :status, learnedAt = :learnedAt WHERE id = :id")
-    suspend fun setStatus(id: Long, status: String, learnedAt: String?)
-
-    @Query("SELECT * FROM pending_changes ORDER BY id")
-    suspend fun pending(): List<PendingChange>
-
-    @Query("SELECT * FROM pending_changes WHERE wordId = :wordId")
-    suspend fun pendingFor(wordId: Long): PendingChange?
+    @Query("SELECT word FROM words")
+    suspend fun texts(): List<String>
 
     @Insert
-    suspend fun insertPending(change: PendingChange)
+    suspend fun insert(word: Word): Long
 
-    @Query("DELETE FROM pending_changes WHERE id = :id")
-    suspend fun deletePending(id: Long)
+    @Update
+    suspend fun update(word: Word)
 
-    @Query("DELETE FROM pending_changes WHERE wordId = :wordId")
-    suspend fun deletePendingFor(wordId: Long)
+    @Query("UPDATE words SET status = :status, learnedAt = :learnedAt, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun setStatus(id: Long, status: String, learnedAt: String?, updatedAt: String)
 
-    @Query("SELECT lastSync FROM sync_state WHERE id = 0")
-    suspend fun lastSync(): String?
+    @Query("DELETE FROM words WHERE id = :id")
+    suspend fun delete(id: Long)
 
-    @Upsert
-    suspend fun setSyncState(state: SyncState)
+    @Insert
+    suspend fun insertKindleImport(row: KindleImport)
+
+    @Query("SELECT MAX(lastKindleTimestamp) FROM kindle_imports")
+    suspend fun lastKindleTimestamp(): Long?
 }
 
-@Database(entities = [WordRow::class, PendingChange::class, SyncState::class], version = 1, exportSchema = false)
+@Database(entities = [Word::class, KindleImport::class], version = 1, exportSchema = false)
 abstract class VocabDb : RoomDatabase() {
     abstract fun dao(): VocabDao
 
     companion object {
-        /** One database per server and user, so switching users never mixes their words. */
-        fun open(context: Context, account: String): VocabDb =
-            Room.databaseBuilder(context.applicationContext, VocabDb::class.java, "words-$account.db").build()
+        fun open(context: Context): VocabDb {
+            dropServerCopies(context)
+            return Room.databaseBuilder(context.applicationContext, VocabDb::class.java, "vocab.db").build()
+        }
+
+        /** The server version's per-account copies (words-<account>.db); the server is gone. */
+        private fun dropServerCopies(context: Context) {
+            context.databaseList().filter { it.startsWith("words-") && it.endsWith(".db") }.forEach(context::deleteDatabase)
+        }
     }
 }
-
-fun WordRow.toWord() = Word(id, word, definition, example, finnish, ipa, hasAudio, status, learnedAt, updatedAt)
-
-fun Word.toRow() = WordRow(id, word, definition, example, finnish, ipa, hasAudio, status, learnedAt, updatedAt)

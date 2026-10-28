@@ -1,6 +1,6 @@
 package io.github.olrut.vocab.review
 
-import io.github.olrut.vocab.api.Word
+import io.github.olrut.vocab.data.Word
 import io.github.olrut.vocab.data.WordStore
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.test.TestScope
@@ -13,34 +13,28 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.random.Random
 
-/** A store in memory: [words] is the local table, [server] what a sync brings in. */
+/** A store in memory. */
 private class FakeStore : WordStore {
     val words = (1L..3L).associateWith { word(it) }.toMutableMap()
-    var server: Map<Long, Word>? = null
-    var failSync: Exception? = null
     val changes = mutableListOf<Pair<Long, String>>()
-    var syncs = 0
+    var reads = 0
+    var failRead: Exception? = null
+    var failWrite: Exception? = null
     /** When set, the next read waits for it, so a test can hold one in flight. */
     var readGate: CompletableDeferred<Unit>? = null
-    /** When set, sync waits for it. */
-    var syncGate: CompletableDeferred<Unit>? = null
 
     override suspend fun learning(): List<Word> {
-        val snapshot = words.values.filter { it.status == "learning" }
+        reads++
+        failRead?.let { throw it }
+        val snapshot = words.values.filter { it.status == Word.LEARNING }
         readGate?.let { readGate = null; it.await() }
         return snapshot
     }
 
     override suspend fun setStatus(id: Long, status: String) {
+        failWrite?.let { throw it }
         changes += id to status
         words[id] = words.getValue(id).copy(status = status)
-    }
-
-    override suspend fun sync() {
-        syncGate?.await()
-        syncs++
-        failSync?.let { throw it }
-        server?.let { words.clear(); words.putAll(it) }
     }
 }
 
@@ -53,63 +47,39 @@ class ReviewControllerTest {
     }
 
     @Test
-    fun `loads the local words into a shuffled deck and syncs`() = runTest {
+    fun `loads the words into a shuffled deck`() = runTest {
         val (c, store) = setup()
         val s = c.state.value
         assertFalse(s.loading)
-        assertFalse(s.syncing)
         assertEquals(setOf(1L, 2L, 3L), s.deck.queue.map { it.id }.toSet())
         assertFalse(s.revealed)
-        assertEquals(1, store.syncs)
+        assertEquals(1, store.reads)
     }
 
     @Test
-    fun `shows the local words before the sync finishes`() = runTest {
-        val store = FakeStore()
-        store.syncGate = CompletableDeferred()
-        val (c, _) = setup(store)
-        assertEquals(3, c.state.value.deck.queue.size)
-        assertTrue(c.state.value.syncing)
-        store.syncGate!!.complete(Unit)
-        runCurrent()
-        assertFalse(c.state.value.syncing)
+    fun `is loading until the first read`() = runTest {
+        val c = ReviewController(FakeStore(), backgroundScope, Random(7))
+        assertTrue(c.state.value.loading)
     }
 
     @Test
-    fun `words from the sync join the deck`() = runTest {
-        val store = FakeStore()
-        store.syncGate = CompletableDeferred()
-        val (c, _) = setup(store)
-        store.server = store.words + (9L to word(9))
-        store.syncGate!!.complete(Unit)
+    fun `words added meanwhile join the deck on the next load, the current word stays`() = runTest {
+        val (c, store) = setup()
+        val current = c.state.value.deck.current!!
+        store.words[9L] = word(9)
+        c.load()
         runCurrent()
+        assertEquals(current.id, c.state.value.deck.current!!.id)
         assertEquals(setOf(1L, 2L, 3L, 9L), c.state.value.deck.queue.map { it.id }.toSet())
     }
 
     @Test
-    fun `an automatic sync that fails says so quietly and keeps the words`() = runTest {
+    fun `a failed read is reported and ends loading`() = runTest {
         val store = FakeStore()
-        store.failSync = java.net.ConnectException("refused")
+        store.failRead = IllegalStateException("disk full")
         val (c, _) = setup(store)
-        assertEquals(3, c.state.value.deck.queue.size)
-        assertEquals("Cannot reach the server", c.state.value.notSynced)
-        assertNull(c.state.value.error)
-    }
-
-    @Test
-    fun `sync now reports a failure, and a later success clears the note`() = runTest {
-        val (c, store) = setup()
-        store.failSync = java.net.ConnectException("refused")
-        c.syncNow()
-        runCurrent()
-        assertEquals("Sync failed: Cannot reach the server", c.state.value.error)
-        assertEquals("Cannot reach the server", c.state.value.notSynced)
-        c.clearError()
-        store.failSync = null
-        c.syncNow()
-        runCurrent()
-        assertNull(c.state.value.error)
-        assertNull(c.state.value.notSynced)
+        assertFalse(c.state.value.loading)
+        assertEquals("Could not read your words: disk full", c.state.value.error)
     }
 
     @Test
@@ -125,7 +95,7 @@ class ReviewControllerTest {
     }
 
     @Test
-    fun `mark learned advances at once, stores the change, syncs and offers undo`() = runTest {
+    fun `mark learned advances at once, stores the change, reads again and offers undo`() = runTest {
         val (c, store) = setup()
         val w = c.state.value.deck.current!!
         c.reveal()
@@ -134,21 +104,21 @@ class ReviewControllerTest {
         assertFalse(c.state.value.revealed)
         assertEquals(w, c.state.value.undo)
         runCurrent()
-        assertEquals(listOf(w.id to "learned"), store.changes)
-        assertEquals(2, store.syncs)
+        assertEquals(listOf(w.id to Word.LEARNED), store.changes)
+        assertEquals(2, store.reads)
         assertFalse(c.state.value.deck.queue.any { it.id == w.id })
+        assertNull(c.state.value.error)
     }
 
     @Test
-    fun `mark learned works the same offline`() = runTest {
-        val store = FakeStore()
-        store.failSync = java.net.ConnectException("refused")
-        val (c, _) = setup(store)
+    fun `a failed save is reported`() = runTest {
+        val (c, store) = setup()
+        store.failWrite = IllegalStateException("disk full")
         val w = c.state.value.deck.current!!
         c.markLearned()
         runCurrent()
-        assertEquals(listOf(w.id to "learned"), store.changes)
-        assertFalse(c.state.value.deck.queue.any { it.id == w.id })
+        assertEquals("Could not save “${w.word}”: disk full", c.state.value.error)
+        c.clearError()
         assertNull(c.state.value.error)
     }
 
@@ -161,7 +131,7 @@ class ReviewControllerTest {
         assertEquals(w, c.state.value.deck.current)
         assertNull(c.state.value.undo)
         runCurrent()
-        assertEquals(listOf(w.id to "learned", w.id to "learning"), store.changes)
+        assertEquals(listOf(w.id to Word.LEARNED, w.id to Word.LEARNING), store.changes)
         assertEquals(w.id, c.state.value.deck.current!!.id)
     }
 
@@ -171,7 +141,7 @@ class ReviewControllerTest {
         val c = ReviewController(store, backgroundScope, Random(7))
         c.load()
         runCurrent()
-        // A sync is under way and its read of the store is in flight when the word is swiped.
+        // A read of the store is in flight when the word is swiped.
         val gate = CompletableDeferred<Unit>()
         store.readGate = gate
         c.load()
@@ -182,7 +152,7 @@ class ReviewControllerTest {
         // The old read lands last, after the change was stored and read back.
         gate.complete(Unit)
         runCurrent()
-        assertEquals(listOf(w.id to "learned"), store.changes)
+        assertEquals(listOf(w.id to Word.LEARNED), store.changes)
         assertFalse(c.state.value.deck.queue.any { it.id == w.id })
     }
 
@@ -194,17 +164,6 @@ class ReviewControllerTest {
         runCurrent()
         assertNull(c.state.value.undo)
         assertEquals(1, store.changes.size)
-    }
-
-    @Test
-    fun `sync keeps the current word in front`() = runTest {
-        val (c, store) = setup()
-        val current = c.state.value.deck.current!!
-        store.server = store.words + (9L to word(9))
-        c.load()
-        runCurrent()
-        assertEquals(current.id, c.state.value.deck.current!!.id)
-        assertEquals(4, c.state.value.deck.queue.size)
     }
 
     @Test
