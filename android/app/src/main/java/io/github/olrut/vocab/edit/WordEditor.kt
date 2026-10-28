@@ -96,7 +96,7 @@ class WordEditor(private val repo: WordRepository, private val dictionary: WordL
         val seq = ++lookupSeq
         _state.update { it.copy(lookup = LookupState.Busy, error = null) }
         return scope.launch {
-            val result = dictionary.lookup(text)
+            val result = dictionary.lookup(text, null)
             if (seq != lookupSeq) return@launch
             _state.update {
                 when (result) {
@@ -110,7 +110,16 @@ class WordEditor(private val repo: WordRepository, private val dictionary: WordL
 
     fun pick(sense: Sense) = _state.update {
         it.copy(
-            form = it.form.copy(definition = sense.definition, example = sense.example ?: it.form.example, source = if (it.form.id == null) Word.SOURCE_DICTIONARY else it.form.source),
+            form = it.form.copy(
+                definition = sense.definition,
+                example = sense.example ?: it.form.example,
+                finnish = sense.finnish ?: it.form.finnish,
+                source = when {
+                    it.form.id != null -> it.form.source
+                    sense.finnish != null -> Word.SOURCE_CLAUDE
+                    else -> Word.SOURCE_DICTIONARY
+                },
+            ),
             lookup = LookupState.Idle,
         )
     }

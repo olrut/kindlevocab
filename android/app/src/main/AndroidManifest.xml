@@ -11,9 +11,12 @@
     </queries>
 
     <!-- The phone holds the only copy of the words, so Android's backup (to the Google account,
-         and to a new phone) includes them. The audio cache is left out, as caches always are. -->
+         and to a new phone) includes them. The audio cache is left out, as caches always are, and
+         so is the Claude API key (res/xml). -->
     <application
         android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"

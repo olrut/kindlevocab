@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12 and newer. The Claude key stays on this phone (encrypted with a key that is not backed up). -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="claude.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="claude.xml" />
+    </device-transfer>
+</data-extraction-rules>

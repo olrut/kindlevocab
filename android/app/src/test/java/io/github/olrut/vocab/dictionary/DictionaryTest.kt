@@ -15,12 +15,13 @@ import java.util.concurrent.TimeUnit
 class DictionaryTest {
     private lateinit var server: MockWebServer
     private lateinit var dictionary: Dictionary
+    private val pauses = mutableListOf<Long>()
 
     @Before
     fun setUp() {
         server = MockWebServer()
         server.start()
-        dictionary = Dictionary(OkHttpClient.Builder().readTimeout(1, TimeUnit.SECONDS).build(), server.url("/entries/en/").toString())
+        dictionary = Dictionary(OkHttpClient.Builder().readTimeout(1, TimeUnit.SECONDS).build(), server.url("/entries/en/").toString()) { pauses += it }
     }
 
     @After
@@ -40,7 +41,7 @@ class DictionaryTest {
              {"word":"run","meanings":[{"partOfSpeech":"adjective","definitions":[{"definition":"Melted."}]}]}]
             """,
         )
-        val r = dictionary.lookup("Run ") as Lookup.Found
+        val r = dictionary.lookup("Run ", null) as Lookup.Found
         assertEquals("/entries/en/run", server.takeRequest().path)
         assertEquals("/rʌn/", r.ipa)
         assertEquals("https://x/run-us.mp3", r.audioUrl)
@@ -59,14 +60,14 @@ class DictionaryTest {
         reply(
             """[{"meanings":[{"partOfSpeech":"verb","definitions":[{"definition":"a"},{"definition":"b"},{"definition":"c"},{"definition":"d"}]}]}]""",
         )
-        val r = dictionary.lookup("x") as Lookup.Found
+        val r = dictionary.lookup("x", null) as Lookup.Found
         assertEquals(listOf("a", "b", "c"), r.senses.map { it.definition })
     }
 
     @Test
     fun `falls back to the entry phonetic and fixes protocol-relative audio`() = runTest {
         reply("""[{"phonetic":"/kæt/","phonetics":[{"audio":"//ssl.gstatic.com/cat.mp3"}],"meanings":[{"partOfSpeech":"noun","definitions":[{"definition":"A pet."}]}]}]""")
-        val r = dictionary.lookup("cat") as Lookup.Found
+        val r = dictionary.lookup("cat", null) as Lookup.Found
         assertEquals("/kæt/", r.ipa)
         assertEquals("https://ssl.gstatic.com/cat.mp3", r.audioUrl)
     }
@@ -74,13 +75,13 @@ class DictionaryTest {
     @Test
     fun `prefers the US recording`() = runTest {
         reply("""[{"phonetics":[{"audio":"https://x/cat-uk.mp3"},{"audio":"https://x/cat-us.mp3"}],"meanings":[{"partOfSpeech":"noun","definitions":[{"definition":"A pet."}]}]}]""")
-        assertEquals("https://x/cat-us.mp3", (dictionary.lookup("cat") as Lookup.Found).audioUrl)
+        assertEquals("https://x/cat-us.mp3", (dictionary.lookup("cat", null) as Lookup.Found).audioUrl)
     }
 
     @Test
     fun `no phonetics means no ipa and no audio`() = runTest {
         reply("""[{"meanings":[{"partOfSpeech":"noun","definitions":[{"definition":"A pet."}]}]}]""")
-        val r = dictionary.lookup("cat") as Lookup.Found
+        val r = dictionary.lookup("cat", null) as Lookup.Found
         assertNull(r.ipa)
         assertNull(r.audioUrl)
     }
@@ -88,40 +89,59 @@ class DictionaryTest {
     @Test
     fun `encodes the word into the path`() = runTest {
         reply("[]", 404)
-        dictionary.lookup("ice cream")
+        dictionary.lookup("ice cream", null)
         assertEquals("/entries/en/ice%20cream", server.takeRequest().path)
     }
 
     @Test
     fun `a 404 is not found`() = runTest {
         reply("""{"title":"No Definitions Found"}""", 404)
-        assertEquals(Lookup.NotFound, dictionary.lookup("qwzx"))
+        assertEquals(Lookup.NotFound, dictionary.lookup("qwzx", null))
     }
 
     @Test
     fun `an entry without definitions is not found`() = runTest {
         reply("""[{"word":"x","meanings":[]}]""")
-        assertEquals(Lookup.NotFound, dictionary.lookup("x"))
+        assertEquals(Lookup.NotFound, dictionary.lookup("x", null))
     }
 
     @Test
     fun `a server error or bad json is a failure`() = runTest {
         reply("oops", 500)
-        assertTrue(dictionary.lookup("a") is Lookup.Failed)
+        assertTrue(dictionary.lookup("a", null) is Lookup.Failed)
         reply("{not json")
-        assertTrue(dictionary.lookup("a") is Lookup.Failed)
+        assertTrue(dictionary.lookup("a", null) is Lookup.Failed)
     }
 
     @Test
     fun `no connection is a failure that says so`() = runTest {
         server.shutdown()
-        val r = dictionary.lookup("a") as Lookup.Failed
+        val r = dictionary.lookup("a", null) as Lookup.Failed
         assertEquals("No connection to the dictionary", r.message)
     }
 
     @Test
+    fun `a 429 waits as asked and tries again`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(429).setHeader("Retry-After", "5"))
+        server.enqueue(MockResponse().setResponseCode(429))
+        reply("""[{"meanings":[{"partOfSpeech":"noun","definitions":[{"definition":"A pet."}]}]}]""")
+        assertTrue(dictionary.lookup("cat", null) is Lookup.Found)
+        // Retry-After in seconds; without one, the growing default pause.
+        assertEquals(listOf(5_000L, 4_000L), pauses)
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test
+    fun `a long Retry-After is capped and the retries run out`() = runTest {
+        repeat(4) { server.enqueue(MockResponse().setResponseCode(429).setHeader("Retry-After", "3600")) }
+        assertEquals(Lookup.Failed("The dictionary is busy (too many requests); try again in a minute"), dictionary.lookup("cat", null))
+        assertEquals(listOf(30_000L, 30_000L, 30_000L), pauses)
+        assertEquals(4, server.requestCount)
+    }
+
+    @Test
     fun `an empty word is not looked up`() = runTest {
-        assertEquals(Lookup.NotFound, dictionary.lookup("  "))
+        assertEquals(Lookup.NotFound, dictionary.lookup("  ", null))
         assertEquals(0, server.requestCount)
     }
 }

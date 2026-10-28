@@ -79,6 +79,7 @@ fun ReviewScreen(
     onAdd: () -> Unit,
     onWords: () -> Unit,
     onImport: () -> Unit,
+    onClaude: () -> Unit,
     display: Display,
     onTheme: (ThemeMode) -> Unit,
     onSize: (TextSize) -> Unit,
@@ -128,6 +129,7 @@ fun ReviewScreen(
                 onAdd = onAdd,
                 onWords = onWords,
                 onImport = onImport,
+                onClaude = onClaude,
                 onDisplay = { showDisplay = true },
                 modifier = Modifier.align(Alignment.TopEnd).safeDrawingPadding(),
             )
@@ -228,7 +230,7 @@ private fun Empty(onAdd: () -> Unit, onImport: () -> Unit) {
 }
 
 @Composable
-private fun Menu(onAdd: () -> Unit, onWords: () -> Unit, onImport: () -> Unit, onDisplay: () -> Unit, modifier: Modifier) {
+private fun Menu(onAdd: () -> Unit, onWords: () -> Unit, onImport: () -> Unit, onClaude: () -> Unit, onDisplay: () -> Unit, modifier: Modifier) {
     var open by remember { mutableStateOf(false) }
     Box(modifier) {
         IconButton(onClick = { open = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "Menu") }
@@ -236,6 +238,7 @@ private fun Menu(onAdd: () -> Unit, onWords: () -> Unit, onImport: () -> Unit, o
             DropdownMenuItem(text = { Text("Add a word") }, onClick = { open = false; onAdd() })
             DropdownMenuItem(text = { Text("Words") }, onClick = { open = false; onWords() })
             DropdownMenuItem(text = { Text("Import / export") }, onClick = { open = false; onImport() })
+            DropdownMenuItem(text = { Text("Claude lookups…") }, onClick = { open = false; onClaude() })
             DropdownMenuItem(text = { Text("Display…") }, onClick = { open = false; onDisplay() })
         }
     }

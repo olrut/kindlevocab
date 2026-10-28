@@ -33,8 +33,9 @@ class KindleImporterTest {
     private val asked: MutableList<String> = Collections.synchronizedList(mutableListOf())
     private val answers = mutableMapOf<String, Lookup>()
 
-    private val dictionary = { w: String -> asked += w; answers[w] ?: Lookup.NotFound }
-    private fun importer() = KindleImporter(repo, { dictionary(it) })
+    private val contexts = mutableMapOf<String, String?>()
+    private val dictionary = { w: String, c: String? -> asked += w; contexts[w] = c; answers[w] ?: Lookup.NotFound }
+    private fun importer() = KindleImporter(repo, { w, c -> dictionary(w, c) })
 
     private fun kw(word: String, ts: Long, usage: String? = null, mastered: Boolean = false, lookupAt: Long? = null) =
         KindleWord(word, usage, "Book", "Author", mastered, ts, lookupAt)
@@ -91,6 +92,15 @@ class KindleImporterTest {
         val q = repo.find("qwzx")!!
         assertNull(q.definition)
         assertEquals(3000L, repo.lastKindleTimestamp())
+    }
+
+    @Test
+    fun `the lookup gets the book sentence, and Claude's Finnish is kept`() = runTest {
+        answers["ephemeral"] = Lookup.Found(null, null, listOf(Sense(null, "lasting a short time", "An ephemeral joy.", "lyhytaikainen")))
+        importer().import(vocab, listOf("ephemeral", "qwzx"), markMastered = true)
+        assertEquals("An ephemeral joy.", contexts["ephemeral"])
+        assertNull(contexts["qwzx"])
+        assertEquals("lyhytaikainen", repo.find("ephemeral")!!.finnish)
     }
 
     @Test

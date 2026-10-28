@@ -2,6 +2,7 @@ package io.github.olrut.vocab.dictionary
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
@@ -12,8 +13,8 @@ import java.io.IOException
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
-/** One meaning of a word, as offered when adding it. */
-data class Sense(val partOfSpeech: String?, val definition: String, val example: String?)
+/** One meaning of a word, as offered when adding it. [finnish] comes only from Claude. */
+data class Sense(val partOfSpeech: String?, val definition: String, val example: String?, val finnish: String? = null)
 
 sealed interface Lookup {
     data class Found(val ipa: String?, val audioUrl: String?, val senses: List<Sense>) : Lookup
@@ -21,43 +22,56 @@ sealed interface Lookup {
     data class Failed(val message: String) : Lookup
 }
 
-/** Looks a word up; [Dictionary] in the app, a fake in tests. */
+/** Looks a word up; [context] is the sentence it was seen in (Kindle), when known. */
 fun interface WordLookup {
-    suspend fun lookup(word: String): Lookup
+    suspend fun lookup(word: String, context: String?): Lookup
 }
 
 /**
  * The Free Dictionary API (dictionaryapi.dev, docs/SPEC.md § 3): definitions, examples, IPA and a
- * recording for an English word. Free and keyless. Never throws, apart from cancellation.
+ * recording for an English word. Free and keyless, but rate limited: a 429 is retried after the
+ * time it asks for (or a growing pause). Ignores the context. Never throws, apart from cancellation.
  */
 class Dictionary(
     private val client: OkHttpClient = defaultClient(),
     private val baseUrl: String = "https://api.dictionaryapi.dev/api/v2/entries/en/",
+    private val pause: suspend (Long) -> Unit = { delay(it) },
 ) : WordLookup {
-    override suspend fun lookup(word: String): Lookup {
+    override suspend fun lookup(word: String, context: String?): Lookup {
         val w = word.trim().lowercase()
         if (w.isEmpty()) return Lookup.NotFound
-        return withContext(Dispatchers.IO) {
+        val path = URLEncoder.encode(w, "UTF-8").replace("+", "%20")
+        var attempt = 0
+        while (true) {
+            val (result, retryAfterMs) = fetch(path)
+            if (retryAfterMs == null) return result
+            if (++attempt > MAX_RETRIES) return Lookup.Failed("The dictionary is busy (too many requests); try again in a minute")
+            pause(retryAfterMs.coerceAtMost(MAX_PAUSE_MS).coerceAtLeast(BASE_PAUSE_MS shl (attempt - 1)))
+        }
+    }
+
+    /** The result, or (on a 429) how long the server asks to wait. */
+    private suspend fun fetch(path: String): Pair<Lookup, Long?> =
+        withContext(Dispatchers.IO) {
             try {
-                val path = URLEncoder.encode(w, "UTF-8").replace("+", "%20")
                 client.newCall(Request.Builder().url(baseUrl + path).build()).execute().use { res ->
                     when {
-                        res.code == 404 -> Lookup.NotFound
-                        !res.isSuccessful -> Lookup.Failed("The dictionary answered HTTP ${res.code}")
-                        else -> parse(res.body!!.string())
+                        res.code == 429 -> Lookup.Failed("busy") to (res.header("Retry-After")?.trim()?.toLongOrNull()?.times(1000) ?: 0L)
+                        res.code == 404 -> Lookup.NotFound to null
+                        !res.isSuccessful -> Lookup.Failed("The dictionary answered HTTP ${res.code}") to null
+                        else -> parse(res.body!!.string()) to null
                     }
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: IOException) {
-                Lookup.Failed("No connection to the dictionary")
+                Lookup.Failed("No connection to the dictionary") to null
             } catch (e: SerializationException) {
-                Lookup.Failed("The dictionary sent something unexpected")
+                Lookup.Failed("The dictionary sent something unexpected") to null
             } catch (e: IllegalArgumentException) {
-                Lookup.Failed("The dictionary sent something unexpected")
+                Lookup.Failed("The dictionary sent something unexpected") to null
             }
         }
-    }
 
     private fun parse(body: String): Lookup {
         val entries = json.decodeFromString<List<Entry>>(body)
@@ -88,6 +102,10 @@ class Dictionary(
 
     companion object {
         const val MAX_SENSES = 3
+        const val MAX_RETRIES = 3
+        /** The pause before the first retry when the server does not say; doubles each time. */
+        const val BASE_PAUSE_MS = 2_000L
+        const val MAX_PAUSE_MS = 30_000L
         private val json = Json { ignoreUnknownKeys = true }
 
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()

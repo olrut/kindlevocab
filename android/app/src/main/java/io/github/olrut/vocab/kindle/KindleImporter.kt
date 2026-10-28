@@ -29,7 +29,7 @@ data class ImportProgress(
 
 /**
  * Kindle import (docs/SPEC.md § 3, Kindle import): preview the words in a vocab.db, then import
- * the chosen ones, each with a dictionary lookup. The sentence from the book is the example.
+ * the chosen ones, each with a lookup given the sentence from the book, which is the example.
  */
 class KindleImporter(
     private val repo: WordRepository,
@@ -69,7 +69,7 @@ class KindleImporter(
                 if (markMastered && kw.mastered && existing.status == Word.LEARNING) repo.setStatus(existing.id, Word.LEARNED)
                 return report { it.copy(skipped = it.skipped + 1) }
             }
-            val found = when (val r = dictionary.lookup(text)) {
+            val found = when (val r = dictionary.lookup(text, kw.usage)) {
                 is Lookup.Found -> r
                 Lookup.NotFound -> null
                 is Lookup.Failed -> {
@@ -84,6 +84,7 @@ class KindleImporter(
                         word = text,
                         definition = sense?.definition,
                         example = kw.usage ?: sense?.example,
+                        finnish = sense?.finnish,
                         ipa = found?.ipa,
                         audioUrl = found?.audioUrl,
                         source = Word.SOURCE_KINDLE,
@@ -130,6 +131,7 @@ class KindleImporter(
     }
 
     companion object {
-        const val MAX_CONCURRENT_LOOKUPS = 4
+        // The free dictionary answers 429 when asked too often.
+        const val MAX_CONCURRENT_LOOKUPS = 2
     }
 }

@@ -41,9 +41,12 @@ sealed interface ImportState {
  */
 class ImportController(
     private val repo: WordRepository,
+    /** For Kindle words: the app's lookup, Claude's when a key is set. */
+    lookup: WordLookup,
+    /** For pronunciations only: the free dictionary, so filling them in costs nothing. */
     private val dictionary: WordLookup,
     private val scope: CoroutineScope,
-    private val kindle: KindleImporter = KindleImporter(repo, dictionary),
+    private val kindle: KindleImporter = KindleImporter(repo, lookup),
 ) {
     private val _state = MutableStateFlow<ImportState>(ImportState.Idle())
     val state: StateFlow<ImportState> = _state.asStateFlow()
@@ -126,7 +129,7 @@ class ImportController(
             repeat(2) {
                 launch {
                     for ((id, word) in queue) {
-                        val r = dictionary.lookup(word)
+                        val r = dictionary.lookup(word, null)
                         if (r is Lookup.Found) repo.fillPronunciation(id, r.ipa, r.audioUrl)
                     }
                 }

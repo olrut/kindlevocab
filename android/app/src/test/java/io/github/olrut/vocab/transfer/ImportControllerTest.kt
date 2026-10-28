@@ -54,10 +54,18 @@ class ImportControllerTest {
         dir.deleteRecursively()
     }
 
-    private fun TestScope.controller() = ImportController(repo, { w ->
-        synchronized(lookups) { lookups += w }
+    private fun answer(w: String): Lookup =
         if (w == "missing") Lookup.NotFound else Lookup.Found("/$w/", "https://x/$w.mp3", listOf(Sense(null, "def of $w", null)))
-    }, backgroundScope)
+
+    private fun TestScope.controller() = ImportController(
+        repo,
+        lookup = { w, _ -> answer(w) },
+        dictionary = { w, _ ->
+            synchronized(lookups) { lookups += w }
+            answer(w)
+        },
+        scope = backgroundScope,
+    )
 
     @Test
     fun `a Kindle file shows its words with the new ones picked`() = runTest {
