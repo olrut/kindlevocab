@@ -5,6 +5,15 @@ import androidx.compose.animation.core.VectorConverter
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -63,9 +72,18 @@ import kotlinx.coroutines.launch
 private const val UNDO_MS = 3000L
 
 @Composable
-fun ReviewScreen(controller: ReviewController, userName: String, onPlay: (Word) -> Unit, onSwitchUser: () -> Unit) {
+fun ReviewScreen(
+    controller: ReviewController,
+    userName: String,
+    onPlay: (Word) -> Unit,
+    onSwitchUser: () -> Unit,
+    display: Display,
+    onTheme: (ThemeMode) -> Unit,
+    onSize: (TextSize) -> Unit,
+) {
     val state by controller.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    var showDisplay by remember { mutableStateOf(false) }
 
     // Sync whenever the app comes back to the front: words added on the web show up.
     LifecycleResumeEffect(controller) {
@@ -100,18 +118,25 @@ fun ReviewScreen(controller: ReviewController, userName: String, onPlay: (Word) 
         Box(Modifier.fillMaxSize().padding(padding)) {
             val word = state.deck.current
             when {
-                word != null -> Card(word, state.revealed, controller, onPlay)
+                word != null -> Card(word, state.revealed, display.size, controller, onPlay)
                 state.loading || state.syncing -> CircularProgressIndicator(Modifier.align(Alignment.Center))
                 else -> Empty(onSync = controller::syncNow)
             }
             state.notSynced?.let { NotSynced(it, Modifier.align(Alignment.TopStart).safeDrawingPadding()) }
-            Menu(userName, onSync = controller::syncNow, onSwitchUser = onSwitchUser, modifier = Modifier.align(Alignment.TopEnd).safeDrawingPadding())
+            Menu(
+                userName,
+                onSync = controller::syncNow,
+                onDisplay = { showDisplay = true },
+                onSwitchUser = onSwitchUser,
+                modifier = Modifier.align(Alignment.TopEnd).safeDrawingPadding(),
+            )
         }
     }
+    if (showDisplay) DisplayDialog(display, onTheme, onSize, onDismiss = { showDisplay = false })
 }
 
 @Composable
-private fun Card(word: Word, revealed: Boolean, controller: ReviewController, onPlay: (Word) -> Unit) {
+private fun Card(word: Word, revealed: Boolean, textSize: TextSize, controller: ReviewController, onPlay: (Word) -> Unit) {
     val scope = rememberCoroutineScope()
     val offset = remember { Animatable(Offset.Zero, Offset.VectorConverter) }
     val fling = with(LocalDensity.current) { 1000.dp.toPx() }
@@ -157,18 +182,22 @@ private fun Card(word: Word, revealed: Boolean, controller: ReviewController, on
             }
             .semantics { contentDescription = "Tap to reveal, swipe sideways for the next word, swipe down when learned" },
     ) {
+        // The chosen size scales every text on the card, on top of the system font size. (Scaling
+        // the density's fontScale instead does little for the word: Android 14+ scales large text
+        // nonlinearly.)
+        val k = textSize.scale
         Column(
             Modifier.align(Alignment.Center).fillMaxWidth().padding(horizontal = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text(word.word, fontSize = 44.sp, textAlign = TextAlign.Center, style = MaterialTheme.typography.displayMedium)
+            FittedWord(word.word, MaterialTheme.typography.displayMedium.copy(fontSize = 44.sp).scaled(k))
             if (revealed) {
-                if (word.ipa != null) Text(word.ipa, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (word.ipa != null) Text(word.ipa, style = MaterialTheme.typography.titleMedium.scaled(k), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 FilledTonalIconButton(onClick = { onPlay(word) }) { Icon(Icons.Filled.PlayArrow, contentDescription = "Play") }
-                Text(word.definition, style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
-                if (word.example != null) Text(word.example, style = MaterialTheme.typography.bodyLarge, fontStyle = FontStyle.Italic, textAlign = TextAlign.Center)
-                if (word.finnish != null) Text(word.finnish, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center)
+                Text(word.definition, style = MaterialTheme.typography.titleLarge.scaled(k), textAlign = TextAlign.Center)
+                if (word.example != null) Text(word.example, style = MaterialTheme.typography.bodyLarge.scaled(k), fontStyle = FontStyle.Italic, textAlign = TextAlign.Center)
+                if (word.finnish != null) Text(word.finnish, style = MaterialTheme.typography.titleMedium.scaled(k), color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center)
             }
         }
         if (!revealed) {
@@ -203,13 +232,64 @@ private fun NotSynced(reason: String, modifier: Modifier) {
 }
 
 @Composable
-private fun Menu(userName: String, onSync: () -> Unit, onSwitchUser: () -> Unit, modifier: Modifier) {
+private fun Menu(userName: String, onSync: () -> Unit, onDisplay: () -> Unit, onSwitchUser: () -> Unit, modifier: Modifier) {
     var open by remember { mutableStateOf(false) }
     Box(modifier) {
         IconButton(onClick = { open = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "Menu") }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             DropdownMenuItem(text = { Text("Sync now") }, onClick = { open = false; onSync() })
+            DropdownMenuItem(text = { Text("Display…") }, onClick = { open = false; onDisplay() })
             DropdownMenuItem(text = { Text("Switch user ($userName)") }, onClick = { open = false; onSwitchUser() })
         }
     }
 }
+
+/** Theme and word size; each choice applies at once. */
+@Composable
+private fun DisplayDialog(display: Display, onTheme: (ThemeMode) -> Unit, onSize: (TextSize) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+        title = { Text("Display") },
+        text = {
+            Column {
+                Text("Theme", style = MaterialTheme.typography.titleSmall)
+                ThemeMode.entries.forEach { mode -> Choice(mode.label, display.theme == mode) { onTheme(mode) } }
+                Text("Word size", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 16.dp))
+                TextSize.entries.forEach { size -> Choice(size.label, display.size == size) { onSize(size) } }
+            }
+        },
+    )
+}
+
+@Composable
+private fun Choice(label: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().selectable(selected = selected, role = Role.RadioButton, onClick = onClick).padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Text(label, modifier = Modifier.padding(start = 12.dp))
+    }
+}
+
+private fun TextStyle.scaled(k: Float) = copy(fontSize = fontSize * k, lineHeight = lineHeight * k)
+
+/** The word on one line when it can be: shrunk (down to [MIN_WORD_SP]) until it fits the width. */
+@Composable
+private fun FittedWord(text: String, style: TextStyle) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val measurer = rememberTextMeasurer()
+        val width = constraints.maxWidth
+        val fitted = remember(text, style, width) {
+            var s = style
+            while (s.fontSize.value > MIN_WORD_SP && measurer.measure(text, s, softWrap = false, maxLines = 1).size.width > width) {
+                s = s.scaled(0.9f)
+            }
+            s
+        }
+        Text(text, style = fitted, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+    }
+}
+
+private const val MIN_WORD_SP = 24f

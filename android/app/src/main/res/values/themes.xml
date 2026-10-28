@@ -1,3 +1,4 @@
 <resources>
+    <!-- Only the window before Compose draws; matches the Compose theme so there is no flash. -->
     <style name="Theme.Vocab" parent="android:Theme.Material.Light.NoActionBar" />
 </resources>
