@@ -1,72 +1,57 @@
 # Vocab — personal vocabulary trainer
 
-Self-hosted English vocabulary app. Words come mainly from the Kindle Vocabulary Builder (`vocab.db` uploaded in the web UI, real sentences from books as examples) or are typed in the web UI; the Claude API adds a short definition and the Finnish equivalent, the Free Dictionary API adds IPA and audio. A full-screen Android app reviews words with swipe gestures. Every word is also mirrored one-way into an Obsidian vault as Markdown. Single server, Docker Compose, reachable only over Tailscale. **SQLite is the source of truth; the Obsidian vault is a view.**
+An Android app for learning English words. Words come mainly from the Kindle Vocabulary Builder (`vocab.db`, picked with the system file picker; the real sentences from books become the examples) or are typed in; the Free Dictionary API adds definitions, IPA and recordings. A full-screen review shows one word at a time with swipe gestures. **Everything is on the phone: no server, no account, no API keys.** Version 1 (tag `server-final`) had a server, a web UI and Claude lookups.
 
-**Moving to phone only** (SPEC § 6, build order 11–13): the Android app now works without the server: Room holds the words, lookups call the Free Dictionary API from the phone, no Claude. The server, web UI and Docker parts below are being removed; the Android rules here already describe the new app.
-
-Full design (schema, API contract, Claude prompt, offline sync) is in `docs/SPEC.md`. Read it before touching the backend or the Android sync code. Keep SPEC.md updated when the contract changes.
+Full design (Room schema, dictionary rules, Kindle import, CSV/JSON format, screens) is in `docs/SPEC.md`. Read it before changing behaviour, and keep it updated in the same change.
 
 ## Stack
 
-- **Backend:** Node.js 22, TypeScript, Hono, SQLite via `better-sqlite3` + Drizzle ORM. Serves the API and the built web UI from one process.
-- **Web:** React 18 + Vite + TypeScript. Minimal styling (plain CSS modules); no component library.
-- **Android:** Kotlin, Jetpack Compose, Room (the only copy of the words), OkHttp + kotlinx.serialization for the Free Dictionary API. Min SDK 26.
-- **Runtime:** Docker Compose, one container (`server`), volume `./data` holding `vocab.db` and `audio/`.
-- **External APIs:** Anthropic Messages API (key from `ANTHROPIC_API_KEY` env, never shipped to clients), Free Dictionary API (`https://api.dictionaryapi.dev/api/v2/entries/en/{word}`) for IPA and audio.
-- **Inputs/outputs on disk:** Kindle `vocab.db` is an uploaded SQLite file read with `better-sqlite3` in read-only mode. Obsidian vault is a mounted folder (`OBSIDIAN_DIR`); the server writes Markdown there and never reads it.
+- Kotlin, Jetpack Compose (Material 3), Room (the only copy of the words), coroutines.
+- OkHttp + kotlinx.serialization for the Free Dictionary API (`https://api.dictionaryapi.dev/api/v2/entries/en/{word}`).
+- Android's own SQLite (read-only) for the Kindle file. Storage Access Framework for every file; no storage permission.
+- Min SDK 26, target/compile 35, JDK 17.
 
 ## Repository layout
 
 ```
-server/         Hono backend (src/, drizzle/, tests/)
-web/            Vite React app, built output copied into server/public
-android/        Android Studio project
-docs/SPEC.md    Design and API contract
-docker-compose.yml
-.env.example
+android/        Android Studio project (app/src/main/java/io/github/olrut/vocab/)
+  data/         Room entities, DAO, WordRepository
+  dictionary/   Free Dictionary API client
+  edit/         Add/edit logic (WordEditor)
+  kindle/       vocab.db reader and importer
+  transfer/     CSV/JSON format, import/export logic
+  review/       Deck order, swipe decisions, ReviewController
+  audio/        Recording cache, playback with TextToSpeech fallback
+  ui/           Compose screens, theme, display settings
+docs/SPEC.md    Design
 ```
 
 ## Commands
 
 ```
-cd server && npm run dev          # backend with watch, port 3000
-cd server && npm test             # vitest
-cd server && npm run db:migrate   # drizzle migrations
-cd web && npm run dev             # vite dev server proxying /api to :3000
-cd web && npm run build
-cd android && ./gradlew testDebugUnitTest assembleDebug   # JVM unit tests + debug APK (JDK 17, Android SDK 35)
-docker compose up --build         # needs .env (cp .env.example .env) and a writable data/; see SPEC § 8
+cd android && ./gradlew testDebugUnitTest assembleDebug   # JVM unit tests + debug APK
 ```
 
 ## Conventions
 
-- All API routes under `/api`. JSON in, JSON out. Errors: `{ "error": "message" }` with proper status codes.
-- Timestamps are ISO-8601 UTC strings. SQLite stores them as TEXT.
-- Words are stored lowercase and trimmed; the `UNIQUE(user_id, word)` constraint is the dedupe rule.
-- Never hard-delete words; set `deleted_at`. The sync endpoint depends on this.
-- Claude responses are parsed as JSON; validate with zod before use. If parsing fails, return a 502 and do not cache.
-- Cache every successful lookup in `lookup_cache` so a word is never sent to Claude twice.
-- Audio files are downloaded server-side at save time into `data/audio/<wordId>.mp3`. The Android app calls dictionaryapi.dev itself and caches recordings on first play.
-- Auth is a bearer token from `/api/auth/login`. Tailscale is the real perimeter; the PIN is only to keep users apart, so keep the flow simple.
-- Android: all word changes go through `WordRepository` (validation, lowercase unique word, timestamps); screens never write to Room directly. Lookups must work as "not found / failed" without a network: the review screen never needs one.
-- Kindle import always goes through preview → confirm; never insert straight from the uploaded file. Treat the Kindle schema as untrusted input: check tables and columns exist before querying.
-- Obsidian export is one-way and idempotent. Every word write schedules an export of that word; the exporter must be safe to re-run over the whole set at any time. Only touch files under `<OBSIDIAN_DIR>/Vocab/`.
-- Writes to the vault are atomic (temp file + rename). Sanitize filenames derived from book titles.
-- Keep UI text in English in code; the user-facing Android app is English-only.
+- All word changes go through `WordRepository` (validation, lowercase unique words, timestamps); screens never write to Room directly.
+- Timestamps are ISO-8601 UTC strings with milliseconds (`WordRepository.ISO`).
+- Words are stored lowercase and trimmed; the unique index on `word` is the dedupe rule.
+- Logic lives in plain classes (controllers, repository, readers) with JVM tests; composables only render state and forward events.
+- Lookups must fail gracefully ("not found" / "failed") without a network; review, editing, the list and export never need one.
+- Kindle import always goes preview → pick → import. Treat the Kindle file as untrusted input: open it read-only, check tables and columns exist before querying, type-check every value.
+- CSV/JSON import is all or nothing and keeps the version 1 format, so old exports keep importing.
+- Keep UI text in English in code; the app is English-only.
 
 ## Testing
 
-- Backend: unit tests for the lookup parser, sync endpoint, status transitions, the Kindle parser (build a fixture `vocab.db` inside the test) and the Obsidian exporter (write to a temp dir, assert file contents). Mock the Anthropic and dictionary calls; never hit the network in tests.
-- Add a test when fixing a bug in the sync logic.
-
-## Build order
-
-Follow the phases in `docs/SPEC.md` § Build order. Finish and verify a phase (run tests, curl the endpoints) before starting the next one. Do not scaffold the Android project until the backend and web UI work end to end.
+- JVM tests with Robolectric for Room and SQLite (`@Config(sdk = [34])`), MockWebServer for HTTP. Never hit the network in tests.
+- Test-first; run a mutation check on new logic before a PR.
+- Smoke test on the emulator before a PR: no server or key is needed.
 
 ## Don'ts
 
-- Don't add Postgres, Redis, a message queue or an auth library. SQLite and a sessions table are enough.
-- Don't put the Anthropic key, or any secret, in the web bundle or the Android app.
-- Don't change the API contract without updating SPEC.md and the Android client in the same change.
-- Don't read from the Obsidian vault or make it a second source of truth. Don't write outside the app's own subfolder in the vault.
-- Don't scrape Amazon or try to reach the Kindle over the network; the uploaded `vocab.db` is the only Kindle input.
+- Don't add a backend, an account system or analytics; the phone is the whole app.
+- Don't put any secret or API key in the app.
+- Don't ask for storage permissions; use the system file picker.
+- Don't scrape Amazon or try to reach the Kindle over the network; the `vocab.db` file is the only Kindle input.
