@@ -25,10 +25,22 @@ data class Deck(val queue: List<Word>, val pos: Int) {
         return Deck(rest.take(at) + word + rest.drop(at), at)
     }
 
-    /** New contents from the server. The current word stays in front if it is still there. */
+    /**
+     * New contents after a sync, without starting the pass over: words keep their place (with
+     * their new content), gone ones drop out, new ones go somewhere in the part not yet shown.
+     * The current word stays current if it is still there.
+     */
     fun reload(words: List<Word>, random: Random): Deck {
-        val keep = current?.let { c -> words.find { it.id == c.id } } ?: return of(words, random)
-        return Deck(listOf(keep) + words.filter { it.id != keep.id }.shuffled(random), 0)
+        if (queue.isEmpty()) return of(words, random)
+        val byId = words.associateBy { it.id }
+        val known = queue.mapTo(HashSet()) { it.id }
+        val shown = queue.take(pos).mapNotNull { byId[it.id] }
+        val ahead = queue.drop(pos).mapNotNull { byId[it.id] }.toMutableList()
+        val first = if (ahead.firstOrNull()?.id == current?.id) 1 else 0
+        for (w in words.filter { it.id !in known }.shuffled(random)) {
+            ahead.add(first + random.nextInt(ahead.size - first + 1), w)
+        }
+        return if (ahead.isEmpty()) reshuffle(shown, current, random) else Deck(shown + ahead, shown.size)
     }
 
     companion object {
