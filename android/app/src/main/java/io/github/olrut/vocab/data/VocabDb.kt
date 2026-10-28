@@ -85,6 +85,10 @@ interface VocabDao {
     @Query("UPDATE words SET status = :status, learnedAt = :learnedAt, updatedAt = :updatedAt WHERE id = :id")
     suspend fun setStatus(id: Long, status: String, learnedAt: String?, updatedAt: String)
 
+    /** Fills a missing pronunciation; what the word already has stays. */
+    @Query("UPDATE words SET ipa = COALESCE(ipa, :ipa), audioUrl = COALESCE(audioUrl, :audioUrl) WHERE id = :id")
+    suspend fun fillPronunciation(id: Long, ipa: String?, audioUrl: String?)
+
     @Query("DELETE FROM words WHERE id = :id")
     suspend fun delete(id: Long)
 

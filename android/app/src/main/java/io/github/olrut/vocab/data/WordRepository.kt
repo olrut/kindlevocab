@@ -33,6 +33,8 @@ data class WordDraft(
     val learnedAt: String? = null,
 )
 
+data class ImportResult(val added: List<Word>, val skipped: Int)
+
 class DuplicateWordException(val word: String) : Exception("“$word” is already on your list")
 
 class InvalidWordException(message: String) : Exception(message)
@@ -56,6 +58,14 @@ class WordRepository(
 
     suspend fun contains(word: String): Boolean = dao.find(normalizeWord(word)) != null
 
+    suspend fun find(word: String): Word? = dao.find(normalizeWord(word))
+
+    /** Where the last Kindle import got to (Kindle ms timestamp), null before the first. */
+    suspend fun lastKindleTimestamp(): Long? = dao.lastKindleTimestamp()
+
+    suspend fun recordKindleImport(lastKindleTimestamp: Long) =
+        dao.insertKindleImport(KindleImport(importedAt = timestamp(), lastKindleTimestamp = lastKindleTimestamp))
+
     /** The normalised texts of every word on the list. */
     suspend fun texts(): Set<String> = dao.texts().toSet()
 
@@ -65,16 +75,35 @@ class WordRepository(
         val at = timestamp()
         return db.withTransaction {
             if (dao.find(d.word) != null) throw DuplicateWordException(d.word)
-            val word = Word(
-                word = d.word, definition = d.definition, example = d.example, finnish = d.finnish, ipa = d.ipa,
-                audioUrl = d.audioUrl, source = d.source, status = d.status,
-                learnedAt = if (d.status == Word.LEARNED) d.learnedAt ?: at else null,
-                bookTitle = d.bookTitle, bookAuthor = d.bookAuthor, kindleLookupAt = d.kindleLookupAt, notes = d.notes,
-                createdAt = d.createdAt ?: at, updatedAt = at,
-            )
+            val word = newWord(d, at)
             word.copy(id = dao.insert(word))
         }
     }
+
+    /**
+     * Adds every word not on the list yet, in one transaction; the rest (also repeats within
+     * [drafts]) are skipped. The drafts must be valid: a bad one aborts the whole import.
+     */
+    suspend fun importAll(drafts: List<WordDraft>): ImportResult {
+        val valid = drafts.map(::validate)
+        val at = timestamp()
+        return db.withTransaction {
+            val added = mutableListOf<Word>()
+            var skipped = 0
+            for (d in valid) {
+                if (dao.find(d.word) != null) {
+                    skipped++
+                    continue
+                }
+                val word = newWord(d, at)
+                added += word.copy(id = dao.insert(word))
+            }
+            ImportResult(added, skipped)
+        }
+    }
+
+    /** Sets the IPA and recording where the word has none (after an import). */
+    suspend fun fillPronunciation(id: Long, ipa: String?, audioUrl: String?) = dao.fillPronunciation(id, ipa, audioUrl)
 
     /**
      * Replaces the word's text fields with the draft's; status, source and book stay. A new word
@@ -109,6 +138,14 @@ class WordRepository(
     }
 
     private fun timestamp(): String = ISO.format(now())
+
+    private fun newWord(d: WordDraft, at: String) = Word(
+        word = d.word, definition = d.definition, example = d.example, finnish = d.finnish, ipa = d.ipa,
+        audioUrl = d.audioUrl, source = d.source, status = d.status,
+        learnedAt = if (d.status == Word.LEARNED) d.learnedAt ?: at else null,
+        bookTitle = d.bookTitle, bookAuthor = d.bookAuthor, kindleLookupAt = d.kindleLookupAt, notes = d.notes,
+        createdAt = d.createdAt ?: at, updatedAt = at,
+    )
 
     companion object {
         const val MAX_WORD = 100
