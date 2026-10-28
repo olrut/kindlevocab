@@ -1,6 +1,7 @@
 package io.github.olrut.vocab
 
 import android.app.Application
+import android.content.Context
 import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -15,6 +16,7 @@ import io.github.olrut.vocab.audio.Speaker
 import io.github.olrut.vocab.data.Repository
 import io.github.olrut.vocab.data.VocabDb
 import io.github.olrut.vocab.review.ReviewController
+import io.github.olrut.vocab.ui.DisplayStore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -38,6 +40,7 @@ sealed interface Screen {
 /** Which screen is showing, and the session behind it. Survives rotation. */
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val session = Session(app)
+    val display = DisplayStore(app.getSharedPreferences("display", Context.MODE_PRIVATE))
     val speaker = Speaker(app)
     private var api: VocabApi? = null
 

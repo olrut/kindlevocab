@@ -235,7 +235,9 @@ Screens:
   - Swipe down (vertical drag > 25 % of height): mark learned, advance, show a 3-second snackbar "Marked as learned — Undo".
   - Order: shuffle the learning list on screen entry and whenever it is exhausted; then start over. A sync does not restart the pass: words keep their place, words gone from the list drop out, new words go somewhere after the current word.
   - Empty list: "No words to learn. Add words in the web app." plus a sync button.
-- Small overflow menu: Sync now, Switch user (tries a sync for up to 5 s, then calls `POST /auth/logout`, best effort, and forgets the token; changes still pending stay in that user's local database for their next login).
+- Small overflow menu: Sync now, Display…, Switch user (tries a sync for up to 5 s, then calls `POST /auth/logout`, best effort, and forgets the token; changes still pending stay in that user's local database for their next login).
+
+Display… (per device, plain SharedPreferences): theme — follow the system (default), light or dark; Material You wallpaper colours on Android 12+, a blue scheme before that — and word size — small, normal (default), large or extra large (0.85×, 1×, 1.2×, 1.45× of the card's text, on top of the system font size). Changes apply at once. The word stays on one line when it can: a word too wide for the screen is shrunk to fit (not below 24 sp).
 
 The play button uses the recording in the cache dir when there is one, downloads `GET /audio/:id` on first use when `hasAudio`, else (or on failure) uses TextToSpeech.
 
