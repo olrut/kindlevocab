@@ -1,6 +1,6 @@
 package io.github.olrut.vocab.review
 
-import io.github.olrut.vocab.api.Word
+import io.github.olrut.vocab.data.Word
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -9,7 +9,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.random.Random
 
-fun word(id: Long, text: String = "w$id") = Word(id = id, word = text, definition = "def of $text", updatedAt = "2026-01-01T00:00:00.000Z")
+fun word(id: Long, text: String = "w$id") = Word(id = id, word = text, definition = "def of $text")
 
 class DeckTest {
     private val words = (1L..5L).map { word(it) }

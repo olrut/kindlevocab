@@ -4,12 +4,12 @@ import android.content.Context
 import android.media.MediaPlayer
 import android.speech.tts.TextToSpeech
 import android.util.Log
-import io.github.olrut.vocab.api.Word
+import io.github.olrut.vocab.data.Word
 import java.io.File
 import java.util.Locale
 
 /**
- * Says a word: the server's recording when it has one (from [AudioCache]),
+ * Says a word: the dictionary's recording when it has one (from [AudioCache]),
  * otherwise, or if that fails, Android TextToSpeech in en-US.
  */
 class Speaker(context: Context) {
@@ -20,7 +20,7 @@ class Speaker(context: Context) {
     private var player: MediaPlayer? = null
 
     suspend fun say(word: Word, cache: AudioCache) {
-        val file = if (word.hasAudio) cache.get(word.id) else null
+        val file = cache.get(word)
         if (file == null || !play(file)) speak(word.word)
     }
 

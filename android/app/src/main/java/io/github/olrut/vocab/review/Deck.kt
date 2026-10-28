@@ -1,6 +1,6 @@
 package io.github.olrut.vocab.review
 
-import io.github.olrut.vocab.api.Word
+import io.github.olrut.vocab.data.Word
 import kotlin.random.Random
 
 /**

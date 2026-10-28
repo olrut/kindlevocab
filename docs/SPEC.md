@@ -225,38 +225,38 @@ Details:
 
 ## 6. Android app
 
-Screens:
-- **Server** (first run, and "Change server" on the picker) — the server address, e.g. `https://vocab.tail1234.ts.net`; `https://` is assumed when no scheme is given, `/api/` is appended. Connecting checks it with `GET /users`. Cleartext `http://` is allowed (the tailnet encrypts; also for a dev server at `http://10.0.2.2:3000` from the emulator).
-- **UserPicker** — same list as web; a user with a PIN gets a PIN field (focused; Go logs in). Login sends `device: "android:<Build.MODEL>"`. Server address, token and user name are stored in EncryptedSharedPreferences; the app reopens on Review while the token is valid. A 401 on a request that carried the token clears it and returns here with "Signed out by the server".
-- **Review** — the only real screen.
+**Phone only** (from version 2.0): the app needs no server. Words live in a Room database on the phone; lookups go straight to the Free Dictionary API. The server, web UI and Obsidian export (§§ 2–5, 7, 8) are being removed; until then they still describe the server version.
+
+Screens (a back stack; the system back button pops it):
+- **Review** — the start screen.
   - Full-screen word, large centred text, keep-screen-on.
-  - Tap: reveal definition, example, finnish, IPA; play button (local mp3 if cached, else Android `TextToSpeech` en-US).
+  - Tap: reveal definition (or "No definition yet"), example, finnish, IPA; play button (the cached recording, downloaded from the word's `audioUrl` on first use, else Android `TextToSpeech` en-US).
   - Swipe left or right (horizontal drag > 25 % of width, velocity threshold): next word.
   - Swipe down (vertical drag > 25 % of height): mark learned, advance, show a 3-second snackbar "Marked as learned — Undo".
-  - Order: shuffle the learning list on screen entry and whenever it is exhausted; then start over. A sync does not restart the pass: words keep their place, words gone from the list drop out, new words go somewhere after the current word.
-  - Empty list: "No words to learn. Add words in the web app." plus a sync button.
-- Small overflow menu: Sync now, Display…, Switch user (tries a sync for up to 5 s, then calls `POST /auth/logout`, best effort, and forgets the token; changes still pending stay in that user's local database for their next login).
+  - Order: shuffle the learning list on screen entry and whenever it is exhausted; then start over. Reading the words again (on return to the screen, after a change) does not restart the pass: words keep their place, words gone from the list drop out, new words go somewhere after the current word.
+  - Empty list: "No words to learn. Add a word, or import your Kindle's vocabulary." with Add a word and All words.
+  - Overflow menu: Add a word, Words, Display….
+- **Words** — every word, newest first; filter chips Learning / Learned / All; a search over word, definition and Finnish (ignoring case); tap a word to edit it; a + button adds one.
+- **Add / Edit** — the word field with Look up (also the keyboard's search key):
+  - Found: up to 3 senses to pick from, plus "Write my own". Picking fills definition and the example (an example the user already wrote stays when the sense has none), and keeps the IPA and recording URL (play button). A new word picked from the dictionary has `source = dictionary`.
+  - Not found / failed: a note; the user writes their own.
+  - Fields: definition, example, Finnish, notes (all optional; a word can be saved with only its text). Learned switch. Changing the word text drops the IPA and recording, which belonged to the old text.
+  - Save: a word already on the list (any case) gives "“word” is already on your list". Edit has Delete (with a confirmation; removes the word and its recording for good).
 
 Display… (per device, plain SharedPreferences): theme — follow the system (default), light or dark; Material You wallpaper colours on Android 12+, a blue scheme before that — and word size — small, normal (default), large or extra large (0.85×, 1×, 1.2×, 1.45× of the card's text, on top of the system font size). Changes apply at once. The word stays on one line when it can: a word too wide for the screen is shrunk to fit (not below 24 sp).
 
-The play button uses the recording in the cache dir when there is one, downloads `GET /audio/:id` on first use when `hasAudio`, else (or on failure) uses TextToSpeech.
+**Dictionary** (`https://api.dictionaryapi.dev/api/v2/entries/en/<word>`, free, no key): IPA is the first `phonetics[].text`, else the entry's `phonetic`; the recording is the first `phonetics[].audio` ending in `-us.mp3`, else the first one (`//…` gets `https:`). Senses: the first definition of each part of speech across all entries, then the further ones, up to 3, each with its example. 404 or no definitions: not found. Timeouts 5 s connect, 10 s read.
 
-Local storage (Room), one database per server and user (`words-<hash>.db`), recordings in `cacheDir/audio/<hash>/<id>.mp3`:
+Local storage (Room, `vocab.db`; the server version's `words-*.db` files and `cacheDir/audio/` are deleted on start). Recordings in `cacheDir/recordings/<id>.mp3` (max 5 MB, written aside and renamed); an unsaved word's recording is played from a temporary file.
 ```
-words(id, word, definition, example, finnish, ipa, hasAudio, status, learnedAt, updatedAt)   -- live words only
-pending_changes(id, wordId, status, changedAt)   -- at most one per word
-sync_state(lastSync)
+words(id autoincrement, word unique lowercase, definition?, example?, finnish?, ipa?, audioUrl?,
+      source manual|dictionary|import|kindle, status learning|learned, learnedAt?, bookTitle?, bookAuthor?,
+      kindleLookupAt?, notes?, createdAt, updatedAt)
+kindle_imports(id, importedAt, lastKindleTimestamp)
 ```
+Validation: word trimmed and lowercased, 1–100 characters; definition, example, Finnish at most 2000; notes at most 10 000; blank fields are stored as null. `learned` sets `learnedAt`, `learning` clears it. Timestamps are UTC with milliseconds. Deletes are real deletes (there is nothing to sync).
 
-Marking learned and undo never call the API directly: they change `words` and `pending_changes` in one transaction, so offline and online behave identically. A change that reverses the word's pending change (undo before the push) deletes that row instead; otherwise a row is added (undo after the push adds `status: learning`). Timestamps are written like the server's (UTC, milliseconds).
-
-Sync (on screen entry, when the app returns to the front, after each learned/undo, and manually), one at a time with the local changes:
-1. Pull: `GET /words/changes?since=lastSync` (the epoch on the first sync).
-2. Push: for each `pending_changes` row in order — if the pulled rows include its word with `updatedAt` later than `changedAt`, the word was changed elsewhere afterwards: delete the row and send nothing (last `updatedAt` wins). Otherwise `PATCH /words/:id { status }`; delete the row on 2xx or 404 (404 also removes the local word). Any other failure keeps the row and ends this sync with `lastSync` unchanged.
-3. Apply: upsert the pulled rows, then the PATCH replies (newer); remove rows with `deletedAt`, with their pending row and recording; set `lastSync = serverTime`.
-4. Audio: for words with `hasAudio` and no local file, download `GET /audio/:id` (best effort, background, one pass at a time).
-
-The review screen shows the local words at once and reads them again after each sync. When a sync fails, a small "Not synced · <reason>" note stays up until one succeeds; only "Sync now" also shows the error in a snackbar.
+Android's backup is on (`allowBackup`): the phone holds the only copy, so it goes with the Google account backup and to a new phone. Caches are not backed up; recordings are downloaded again.
 
 ## 7. Obsidian export
 
@@ -370,3 +370,6 @@ Clients then get HTTPS at `https://<host>.<tailnet>.ts.net`. Update with `git pu
 8. **Android: online only** — user picker, review screen with gestures and reveal, audio/TTS. Reads directly from `GET /words`.
 9. **Android: offline** — Room cache, pending queue, sync, undo semantics, audio cache.
 10. Polish: dark theme, font size, keep-screen-on, empty state.
+11. **Phone only, core** — local Room store, dictionary lookups on the phone, add/edit/delete, word list; no server.
+12. **Phone only, import/export** — Kindle `vocab.db` and CSV/JSON on the phone.
+13. **Remove the server side** — server, web UI, Docker, Proxmox script; docs.

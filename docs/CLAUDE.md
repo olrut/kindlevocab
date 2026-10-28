@@ -2,13 +2,15 @@
 
 Self-hosted English vocabulary app. Words come mainly from the Kindle Vocabulary Builder (`vocab.db` uploaded in the web UI, real sentences from books as examples) or are typed in the web UI; the Claude API adds a short definition and the Finnish equivalent, the Free Dictionary API adds IPA and audio. A full-screen Android app reviews words with swipe gestures. Every word is also mirrored one-way into an Obsidian vault as Markdown. Single server, Docker Compose, reachable only over Tailscale. **SQLite is the source of truth; the Obsidian vault is a view.**
 
+**Moving to phone only** (SPEC § 6, build order 11–13): the Android app now works without the server: Room holds the words, lookups call the Free Dictionary API from the phone, no Claude. The server, web UI and Docker parts below are being removed; the Android rules here already describe the new app.
+
 Full design (schema, API contract, Claude prompt, offline sync) is in `docs/SPEC.md`. Read it before touching the backend or the Android sync code. Keep SPEC.md updated when the contract changes.
 
 ## Stack
 
 - **Backend:** Node.js 22, TypeScript, Hono, SQLite via `better-sqlite3` + Drizzle ORM. Serves the API and the built web UI from one process.
 - **Web:** React 18 + Vite + TypeScript. Minimal styling (plain CSS modules); no component library.
-- **Android:** Kotlin, Jetpack Compose, Room for the offline cache, Retrofit + kotlinx.serialization for the API. Min SDK 26.
+- **Android:** Kotlin, Jetpack Compose, Room (the only copy of the words), OkHttp + kotlinx.serialization for the Free Dictionary API. Min SDK 26.
 - **Runtime:** Docker Compose, one container (`server`), volume `./data` holding `vocab.db` and `audio/`.
 - **External APIs:** Anthropic Messages API (key from `ANTHROPIC_API_KEY` env, never shipped to clients), Free Dictionary API (`https://api.dictionaryapi.dev/api/v2/entries/en/{word}`) for IPA and audio.
 - **Inputs/outputs on disk:** Kindle `vocab.db` is an uploaded SQLite file read with `better-sqlite3` in read-only mode. Obsidian vault is a mounted folder (`OBSIDIAN_DIR`); the server writes Markdown there and never reads it.
@@ -44,9 +46,9 @@ docker compose up --build         # needs .env (cp .env.example .env) and a writ
 - Never hard-delete words; set `deleted_at`. The sync endpoint depends on this.
 - Claude responses are parsed as JSON; validate with zod before use. If parsing fails, return a 502 and do not cache.
 - Cache every successful lookup in `lookup_cache` so a word is never sent to Claude twice.
-- Audio files are downloaded server-side at save time into `data/audio/<wordId>.mp3`. Clients never call dictionaryapi.dev directly.
+- Audio files are downloaded server-side at save time into `data/audio/<wordId>.mp3`. The Android app calls dictionaryapi.dev itself and caches recordings on first play.
 - Auth is a bearer token from `/api/auth/login`. Tailscale is the real perimeter; the PIN is only to keep users apart, so keep the flow simple.
-- Android: all status changes go through the pending-changes queue, never directly to the API, so offline behaviour is identical to online.
+- Android: all word changes go through `WordRepository` (validation, lowercase unique word, timestamps); screens never write to Room directly. Lookups must work as "not found / failed" without a network: the review screen never needs one.
 - Kindle import always goes through preview → confirm; never insert straight from the uploaded file. Treat the Kindle schema as untrusted input: check tables and columns exist before querying.
 - Obsidian export is one-way and idempotent. Every word write schedules an export of that word; the exporter must be safe to re-run over the whole set at any time. Only touch files under `<OBSIDIAN_DIR>/Vocab/`.
 - Writes to the vault are atomic (temp file + rename). Sanitize filenames derived from book titles.

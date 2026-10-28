@@ -13,10 +13,11 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.activity.compose.BackHandler
+import io.github.olrut.vocab.ui.EditScreen
 import io.github.olrut.vocab.ui.ReviewScreen
-import io.github.olrut.vocab.ui.ServerScreen
-import io.github.olrut.vocab.ui.UserPickerScreen
 import io.github.olrut.vocab.ui.VocabTheme
+import io.github.olrut.vocab.ui.WordsScreen
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -38,24 +39,31 @@ class MainActivity : ComponentActivity() {
             }
             VocabTheme(display) {
                 Surface {
-                    val screen by vm.screen.collectAsStateWithLifecycle()
+                    val stack by vm.stack.collectAsStateWithLifecycle()
                     val scope = rememberCoroutineScope()
-                    when (val s = screen) {
-                        is Screen.Server -> ServerScreen(s, onConnect = vm::connect)
-                        is Screen.Users -> UserPickerScreen(
-                            s,
-                            onLogin = vm::login,
-                            onRetry = { vm.showUsers() },
-                            onChangeServer = vm::changeServer,
-                        )
-                        is Screen.Review -> ReviewScreen(
-                            s.controller,
-                            s.userName,
-                            onPlay = { word -> scope.launch { vm.speaker.say(word, s.audio) } },
-                            onSwitchUser = vm::switchUser,
+                    BackHandler(enabled = stack.size > 1) { vm.back() }
+                    when (val s = stack.last()) {
+                        Screen.Review -> ReviewScreen(
+                            vm.review,
+                            onPlay = { word -> scope.launch { vm.speaker.say(word, vm.audio) } },
+                            onAdd = vm::addWord,
+                            onWords = vm::showWords,
                             display = display,
                             onTheme = vm.display::setTheme,
                             onSize = vm.display::setSize,
+                        )
+                        is Screen.Words -> WordsScreen(
+                            vm.words,
+                            s.status,
+                            onFilter = vm::filterWords,
+                            onOpen = vm::editWord,
+                            onAdd = vm::addWord,
+                            onBack = { vm.back() },
+                        )
+                        is Screen.Editor -> EditScreen(
+                            s.editor,
+                            onPlay = { word -> scope.launch { vm.speaker.say(word, vm.audio) } },
+                            onClose = { vm.back() },
                         )
                     }
                 }
