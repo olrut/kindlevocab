@@ -1,9 +1,10 @@
 # kindlevocab
 
-Turn your Kindle lookups into flashcards: an Android app that imports the words you looked up on your Kindle, with the sentences from your books, and reviews them one at a time with swipes. Everything stays on the phone: no server, no account, no API key.
+Turn your Kindle lookups into flashcards: an Android app that imports the words you looked up on your Kindle, with the sentences from your books, and reviews them one at a time with swipes. Everything stays on the phone: no server, no account. A Claude API key is optional.
 
 - **Kindle import:** pick the Kindle's `vocab.db`; each word comes in with its book sentence, a definition, IPA and a recording from the free [Free Dictionary API](https://dictionaryapi.dev/).
 - **Add your own:** look a word up, pick a meaning or write your own, add the Finnish equivalent and notes.
+- **Optional Claude lookups:** add your own Anthropic API key (menu → **Claude lookups…**) and Claude gives the Finnish equivalent and, for Kindle words, the meaning that fits the book's sentence. Lookups are billed to your Anthropic account; the key stays encrypted on the phone.
 - **Review:** tap to reveal, swipe sideways for the next word, swipe down when you have learned it.
 - **Your data:** CSV/JSON export and import; included in Android's backup.
 

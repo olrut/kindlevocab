@@ -14,6 +14,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import io.github.olrut.vocab.ui.ClaudeDialog
 import io.github.olrut.vocab.ui.EditScreen
 import io.github.olrut.vocab.ui.ImportScreen
 import io.github.olrut.vocab.ui.ReviewScreen
@@ -43,6 +47,17 @@ class MainActivity : ComponentActivity() {
                     val stack by vm.stack.collectAsStateWithLifecycle()
                     val scope = rememberCoroutineScope()
                     BackHandler(enabled = stack.size > 1) { vm.back() }
+                    var showClaude by remember { mutableStateOf(false) }
+                    if (showClaude) {
+                        val claude by vm.claude.config.collectAsStateWithLifecycle()
+                        ClaudeDialog(
+                            claude,
+                            onSave = { key, model -> runCatching { vm.claude.save(key, model) }.exceptionOrNull()?.message },
+                            onModel = vm.claude::setModel,
+                            onRemove = vm.claude::remove,
+                            onDismiss = { showClaude = false },
+                        )
+                    }
                     when (val s = stack.last()) {
                         Screen.Review -> ReviewScreen(
                             vm.review,
@@ -50,6 +65,7 @@ class MainActivity : ComponentActivity() {
                             onAdd = vm::addWord,
                             onWords = vm::showWords,
                             onImport = vm::showImport,
+                            onClaude = { showClaude = true },
                             display = display,
                             onTheme = vm.display::setTheme,
                             onSize = vm.display::setSize,

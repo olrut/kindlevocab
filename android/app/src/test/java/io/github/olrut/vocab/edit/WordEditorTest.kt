@@ -55,7 +55,7 @@ class WordEditorTest {
         dir.deleteRecursively()
     }
 
-    private fun TestScope.editor() = WordEditor(repo, { w -> asked += w; gate?.await(); answer }, backgroundScope)
+    private fun TestScope.editor() = WordEditor(repo, { w, _ -> asked += w; gate?.await(); answer }, backgroundScope)
 
     @Test
     fun `a lookup offers the senses and keeps the pronunciation`() = runTest {
@@ -84,6 +84,24 @@ class WordEditorTest {
         assertEquals("She ran home.", f.example)
         assertEquals(Word.SOURCE_DICTIONARY, f.source)
         assertEquals(LookupState.Idle, e.state.value.lookup)
+    }
+
+    @Test
+    fun `a sense from Claude fills the Finnish too`() = runTest {
+        val claudeSense = Sense(null, "move fast on foot", "She runs daily.", "juosta")
+        answer = Lookup.Found(null, null, listOf(claudeSense))
+        val e = editor()
+        e.setWord("run")
+        e.update { it.copy(finnish = "mine") }
+        e.lookUp()
+        runCurrent()
+        e.pick(claudeSense)
+        assertEquals("juosta", e.state.value.form.finnish)
+        assertEquals(Word.SOURCE_CLAUDE, e.state.value.form.source)
+        // A dictionary sense has no Finnish: what the user wrote stays.
+        e.update { it.copy(finnish = "mine") }
+        e.pick(found.senses[0])
+        assertEquals("mine", e.state.value.form.finnish)
     }
 
     @Test

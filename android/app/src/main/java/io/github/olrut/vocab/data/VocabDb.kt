@@ -41,6 +41,7 @@ data class Word(
         const val LEARNED = "learned"
         const val SOURCE_MANUAL = "manual"
         const val SOURCE_DICTIONARY = "dictionary"
+        const val SOURCE_CLAUDE = "claude"
         const val SOURCE_IMPORT = "import"
         const val SOURCE_KINDLE = "kindle"
     }

@@ -8,6 +8,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.olrut.vocab.audio.AudioCache
 import io.github.olrut.vocab.audio.Speaker
+import io.github.olrut.vocab.claude.ClaudeLookup
+import io.github.olrut.vocab.claude.ClaudeSettings
+import io.github.olrut.vocab.claude.SmartLookup
 import io.github.olrut.vocab.data.VocabDb
 import io.github.olrut.vocab.data.WordRepository
 import io.github.olrut.vocab.dictionary.Dictionary
@@ -42,11 +45,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val display = DisplayStore(app.getSharedPreferences("display", Context.MODE_PRIVATE))
     val speaker = Speaker(app)
     private val dictionary = Dictionary()
+    val claude = openClaudeSettings(app)
+    /** Claude's when a key is set, else the dictionary's. */
+    private val lookup = SmartLookup(dictionary, ClaudeLookup()) { claude.config.value }
     private val db = VocabDb.open(app)
     val audio = AudioCache(File(app.cacheDir, "recordings"), Dictionary.defaultClient())
     val words = WordRepository(db, audio)
     val review = ReviewController(words, viewModelScope)
-    val imports = ImportController(words, dictionary, viewModelScope)
+    val imports = ImportController(words, lookup, dictionary, viewModelScope)
 
     private val _stack = MutableStateFlow<List<Screen>>(listOf(Screen.Review))
     val stack: StateFlow<List<Screen>> = _stack.asStateFlow()
@@ -60,9 +66,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun filterWords(status: String?) = _stack.update { s -> s.map { if (it is Screen.Words) Screen.Words(status) else it } }
 
-    fun addWord() = push(Screen.Editor(WordEditor(words, dictionary, viewModelScope)))
+    fun addWord() = push(Screen.Editor(WordEditor(words, lookup, viewModelScope)))
 
-    fun editWord(id: Long) = push(Screen.Editor(WordEditor(words, dictionary, viewModelScope).also { it.edit(id) }))
+    fun editWord(id: Long) = push(Screen.Editor(WordEditor(words, lookup, viewModelScope).also { it.edit(id) }))
 
     fun showImport() = push(Screen.Import)
 
@@ -128,6 +134,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun push(screen: Screen) = _stack.update { it + screen }
 
     private companion object {
+        /** The encrypted settings; if they cannot be read (their Keystore key is gone), they start over. */
+        fun openClaudeSettings(app: Application): ClaudeSettings = try {
+            ClaudeSettings.encrypted(app)
+        } catch (e: Exception) {
+            app.deleteSharedPreferences(ClaudeSettings.FILE)
+            ClaudeSettings.encrypted(app)
+        }
+
         const val MAX_KINDLE_BYTES = 200_000_000L
         const val MAX_TRANSFER_BYTES = 10_000_000L
     }
